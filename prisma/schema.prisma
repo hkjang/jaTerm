@@ -274,3 +274,211 @@ model SecurityAlert {
   @@index([severity])
   @@index([createdAt])
 }
+
+// ============================================
+// Command Management Models
+// ============================================
+
+model CommandFavorite {
+  id          String   @id @default(cuid())
+  userId      String
+  command     String
+  description String?
+  usageCount  Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tags CommandFavoriteTag[]
+
+  @@index([userId])
+}
+
+model CommandTag {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  color     String
+  createdAt DateTime @default(now())
+
+  favorites CommandFavoriteTag[]
+}
+
+model CommandFavoriteTag {
+  id         String @id @default(cuid())
+  favoriteId String
+  tagId      String
+
+  favorite CommandFavorite @relation(fields: [favoriteId], references: [id], onDelete: Cascade)
+  tag      CommandTag      @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@unique([favoriteId, tagId])
+}
+
+// ============================================
+// Macro & Automation Models
+// ============================================
+
+model Macro {
+  id          String   @id @default(cuid())
+  userId      String
+  name        String
+  description String?
+  steps       String   // JSON array of MacroStep
+  variables   String?  // JSON array of MacroVariable
+  conditions  String?  // JSON array of MacroCondition
+  isShared    Boolean  @default(false)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  scheduledTasks ScheduledTask[]
+
+  @@index([userId])
+  @@index([isShared])
+}
+
+model ScheduledTask {
+  id          String    @id @default(cuid())
+  userId      String
+  macroId     String?
+  name        String
+  description String?
+  command     String?   // Direct command if no macro
+  schedule    String    // Cron expression
+  targetIds   String    // JSON array of server IDs
+  isActive    Boolean   @default(true)
+  lastRunAt   DateTime?
+  nextRunAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  macro Macro? @relation(fields: [macroId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([isActive])
+  @@index([nextRunAt])
+}
+
+// ============================================
+// Session Collaboration Models
+// ============================================
+
+model SessionShare {
+  id         String    @id @default(cuid())
+  sessionId  String
+  ownerId    String
+  sharedWith String    // User ID
+  permission String    @default("view") // view, interact, control
+  isActive   Boolean   @default(true)
+  expiresAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@unique([sessionId, sharedWith])
+  @@index([sessionId])
+  @@index([sharedWith])
+}
+
+model SessionComment {
+  id        String   @id @default(cuid())
+  sessionId String
+  userId    String
+  userName  String
+  content   String
+  timestamp DateTime @default(now())
+
+  @@index([sessionId])
+  @@index([timestamp])
+}
+
+model ChatMessage {
+  id        String   @id @default(cuid())
+  sessionId String
+  userId    String
+  userName  String
+  content   String
+  type      String   @default("text") // text, command, system
+  timestamp DateTime @default(now())
+
+  @@index([sessionId])
+  @@index([timestamp])
+}
+
+// ============================================
+// User Settings Models
+// ============================================
+
+model TerminalSettings {
+  id             String  @id @default(cuid())
+  userId         String  @unique
+  theme          String  @default("dark")
+  fontSize       Int     @default(14)
+  fontFamily     String  @default("JetBrains Mono")
+  lineHeight     Float   @default(1.4)
+  cursorStyle    String  @default("block")
+  cursorBlink    Boolean @default(true)
+  scrollback     Int     @default(10000)
+  autoScroll     Boolean @default(true)
+  wordWrap       Boolean @default(false)
+  bellStyle      String  @default("visual")
+  
+  // Security settings
+  pasteFilterEnabled   Boolean @default(true)
+  typingDetection      Boolean @default(true)
+  autoLockEnabled      Boolean @default(true)
+  autoLockTimeout      Int     @default(300)
+  watermarkEnabled     Boolean @default(true)
+  confirmDangerous     Boolean @default(true)
+  maskSensitiveData    Boolean @default(true)
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model UserSessionGroup {
+  id          String   @id @default(cuid())
+  userId      String
+  name        String
+  description String?
+  color       String   @default("#6366f1")
+  icon        String?
+  serverIds   String   // JSON array of server IDs
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([userId, name])
+  @@index([userId])
+}
+
+// ============================================
+// Broadcast Execution Models
+// ============================================
+
+model BroadcastExecution {
+  id             String    @id @default(cuid())
+  userId         String
+  command        String
+  targetServers  String    // JSON array of server IDs
+  excludedServers String?  // JSON array of server IDs
+  status         String    @default("running") // running, completed, failed, partial
+  startedAt      DateTime  @default(now())
+  completedAt    DateTime?
+
+  results BroadcastResult[]
+
+  @@index([userId])
+  @@index([startedAt])
+}
+
+model BroadcastResult {
+  id          String  @id @default(cuid())
+  executionId String
+  serverId    String
+  serverName  String
+  status      String  // success, failed, timeout, skipped
+  output      String?
+  error       String?
+  duration    Int     @default(0)
+
+  execution BroadcastExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
+
+  @@index([executionId])
+}
