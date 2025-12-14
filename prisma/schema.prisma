@@ -1,0 +1,276 @@
+// Prisma Schema for jaTerm SSH Terminal Service
+// Using SQLite for development (strings instead of enums for compatibility)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// User & Authentication Models
+// ============================================
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  password      String
+  role          String    @default("USER") // ADMIN, OPERATOR, DEVELOPER, VIEWER, USER
+  department    String?
+  mfaEnabled    Boolean   @default(false)
+  mfaSecret     String?
+  lastLoginAt   DateTime?
+  lastLoginIp   String?
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relations
+  sessions         Session[]
+  terminalSessions TerminalSession[]
+  auditLogs        AuditLog[]
+  approvalRequests ApprovalRequest[] @relation("Requester")
+  approvalActions  ApprovalRequest[] @relation("Approver")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  ipAddress    String?
+  userAgent    String?
+  deviceId     String?
+  createdAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ============================================
+// Server & Access Control Models
+// ============================================
+
+model Server {
+  id          String   @id @default(cuid())
+  name        String
+  hostname    String
+  port        Int      @default(22)
+  username    String
+  authType    String   @default("KEY") // KEY, PASSWORD
+  privateKey  String?
+  password    String?
+  fingerprint String?
+  environment String   @default("DEV") // PROD, STAGE, DEV
+  description String?
+  tags        String? // JSON array stored as string
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  terminalSessions TerminalSession[]
+  policies         PolicyServer[]
+}
+
+model ServerGroup {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  policies PolicyServerGroup[]
+}
+
+// ============================================
+// Policy & Access Control Models
+// ============================================
+
+model Policy {
+  id               String  @id @default(cuid())
+  name             String
+  description      String?
+  priority         Int     @default(0)
+  isActive         Boolean @default(true)
+  allowedDays      String? // JSON: [0,1,2,3,4] (0=Sunday)
+  allowedStartTime String? // HH:MM format
+  allowedEndTime   String? // HH:MM format
+  allowedRoles     String? // JSON array of Role values
+  commandMode      String  @default("BLACKLIST") // BLACKLIST, WHITELIST
+  commandPatterns  String? // JSON array of patterns
+  requireApproval  Boolean @default(false)
+  approverRoles    String? // JSON array of Role values
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  // Relations
+  servers      PolicyServer[]
+  serverGroups PolicyServerGroup[]
+}
+
+model PolicyServer {
+  id       String @id @default(cuid())
+  policyId String
+  serverId String
+
+  policy Policy @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  server Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  @@unique([policyId, serverId])
+}
+
+model PolicyServerGroup {
+  id            String @id @default(cuid())
+  policyId      String
+  serverGroupId String
+
+  policy      Policy      @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  serverGroup ServerGroup @relation(fields: [serverGroupId], references: [id], onDelete: Cascade)
+
+  @@unique([policyId, serverGroupId])
+}
+
+// ============================================
+// Session & Recording Models
+// ============================================
+
+model TerminalSession {
+  id            String    @id @default(cuid())
+  userId        String
+  serverId      String
+  status        String    @default("CONNECTING") // CONNECTING, ACTIVE, DISCONNECTED, TERMINATED, ERROR
+  startedAt     DateTime  @default(now())
+  endedAt       DateTime?
+  clientIp      String?
+  purpose       String?
+  approvalId    String?
+  recordingPath String?
+  recordingHash String?
+
+  // Relations
+  user             User              @relation(fields: [userId], references: [id])
+  server           Server            @relation(fields: [serverId], references: [id])
+  commandLogs      CommandLog[]
+  sessionRecording SessionRecording?
+
+  @@index([userId])
+  @@index([serverId])
+  @@index([startedAt])
+}
+
+model SessionRecording {
+  id        String   @id @default(cuid())
+  sessionId String   @unique
+  data      Bytes // Binary recording data
+  format    String   @default("asciicast")
+  duration  Int? // Duration in seconds
+  checksum  String // SHA-256 hash for integrity
+  createdAt DateTime @default(now())
+
+  session TerminalSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+}
+
+model CommandLog {
+  id        String   @id @default(cuid())
+  sessionId String
+  command   String
+  output    String?
+  riskScore Float    @default(0)
+  blocked   Boolean  @default(false)
+  reason    String?
+  timestamp DateTime @default(now())
+
+  session TerminalSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@index([timestamp])
+}
+
+// ============================================
+// Audit & Approval Models
+// ============================================
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  action     String
+  resource   String
+  resourceId String?
+  details    String? // JSON object
+  ipAddress  String?
+  userAgent  String?
+  timestamp  DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([action])
+  @@index([timestamp])
+}
+
+model ApprovalRequest {
+  id          String    @id @default(cuid())
+  requesterId String
+  serverId    String?
+  purpose     String
+  status      String    @default("PENDING") // PENDING, APPROVED, REJECTED, EXPIRED
+  approverId  String?
+  approvedAt  DateTime?
+  expiresAt   DateTime
+  notes       String?
+  createdAt   DateTime  @default(now())
+
+  requester User  @relation("Requester", fields: [requesterId], references: [id])
+  approver  User? @relation("Approver", fields: [approverId], references: [id])
+
+  @@index([requesterId])
+  @@index([status])
+}
+
+// ============================================
+// AI Analysis Models
+// ============================================
+
+model RiskPattern {
+  id          String   @id @default(cuid())
+  pattern     String
+  riskLevel   Float // 0.0 to 1.0
+  category    String
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model BehaviorProfile {
+  id                 String   @id @default(cuid())
+  userId             String   @unique
+  avgSessionDuration Float?
+  typicalCommands    String? // JSON array of common commands
+  typicalServers     String? // JSON array of commonly accessed server IDs
+  accessPattern      String? // JSON object with time patterns
+  lastUpdated        DateTime @default(now())
+}
+
+model SecurityAlert {
+  id         String    @id @default(cuid())
+  sessionId  String?
+  userId     String?
+  alertType  String // DANGEROUS_COMMAND, ANOMALY_DETECTED, UNAUTHORIZED_ACCESS, SESSION_VIOLATION, POLICY_VIOLATION
+  severity   String // LOW, MEDIUM, HIGH, CRITICAL
+  title      String
+  message    String
+  isResolved Boolean   @default(false)
+  resolvedAt DateTime?
+  resolvedBy String?
+  createdAt  DateTime  @default(now())
+
+  @@index([alertType])
+  @@index([severity])
+  @@index([createdAt])
+}

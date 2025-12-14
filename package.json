@@ -1,0 +1,45 @@
+{
+  "name": "jaterm",
+  "version": "1.0.0",
+  "description": "Web-based SSH Terminal Service with Access Control",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "db:generate": "prisma generate",
+    "db:push": "prisma db push",
+    "db:studio": "prisma studio"
+  },
+  "dependencies": {
+    "@auth/prisma-adapter": "^2.0.0",
+    "@prisma/client": "^5.7.0",
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/addon-web-links": "^0.11.0",
+    "@xterm/addon-webgl": "^0.18.0",
+    "@xterm/xterm": "^5.4.0",
+    "bcryptjs": "^2.4.3",
+    "next": "14.0.4",
+    "next-auth": "^5.0.0-beta.4",
+    "otplib": "^12.0.1",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "ssh2": "^1.15.0",
+    "uuid": "^9.0.0",
+    "ws": "^8.14.2"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/node": "^20.10.4",
+    "@types/react": "^18.2.45",
+    "@types/react-dom": "^18.2.17",
+    "@types/ssh2": "^1.11.19",
+    "@types/uuid": "^9.0.7",
+    "@types/ws": "^8.5.10",
+    "eslint": "^8.55.0",
+    "eslint-config-next": "14.0.4",
+    "prisma": "^5.7.0",
+    "typescript": "^5.3.3"
+  }
+}

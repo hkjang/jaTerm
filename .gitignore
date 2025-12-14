@@ -1,0 +1,14 @@
+.env
+.env.local
+.env.production.local
+.DS_Store
+node_modules
+coverage
+.next
+out
+build
+*.log
+npm-debug.log*
+.pnpm-debug.log*
+prisma/*.db
+prisma/*.db-journal
