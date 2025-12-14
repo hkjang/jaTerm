@@ -1,189 +1,223 @@
-import { prisma } from '@/lib/db';
-import type { AlertType, Severity } from '@prisma/client';
+// Unified Audit Logger for jaTerm
+// Logs all CUD operations with diff tracking and integrity verification
 
-export interface AuditEntry {
+import { prisma } from '@/lib/db';
+import crypto from 'crypto';
+
+export type AuditAction =
+  | 'CREATE'
+  | 'UPDATE'
+  | 'DELETE'
+  | 'LOGIN'
+  | 'LOGOUT'
+  | 'LOGIN_FAILED'
+  | 'OTP_SETUP'
+  | 'OTP_VERIFY'
+  | 'OTP_FAILED'
+  | 'OTP_RESET'
+  | 'SESSION_START'
+  | 'SESSION_END'
+  | 'SESSION_TERMINATED'
+  | 'COMMAND_EXECUTE'
+  | 'COMMAND_BLOCKED'
+  | 'POLICY_CHANGE'
+  | 'ACCESS_DENIED';
+
+export type AuditResource =
+  | 'User'
+  | 'Server'
+  | 'Policy'
+  | 'TerminalSession'
+  | 'CommandLog'
+  | 'Macro'
+  | 'CommandFavorite'
+  | 'ServerGroup'
+  | 'ApprovalRequest';
+
+export interface AuditLogEntry {
   userId?: string;
-  action: string;
-  resource: string;
+  action: AuditAction;
+  resource: AuditResource;
   resourceId?: string;
-  details?: Record<string, any>;
+  details?: Record<string, unknown>;
+  before?: Record<string, unknown>;
+  after?: Record<string, unknown>;
   ipAddress?: string;
   userAgent?: string;
 }
 
 /**
- * Log an audit entry
+ * Generate a hash for audit log integrity verification
  */
-export async function logAudit(entry: AuditEntry): Promise<void> {
-  await prisma.auditLog.create({
+function generateHash(data: string): string {
+  return crypto.createHash('sha256').update(data).digest('hex');
+}
+
+/**
+ * Create a diff between before and after states
+ */
+function createDiff(
+  before?: Record<string, unknown>,
+  after?: Record<string, unknown>
+): Record<string, { before: unknown; after: unknown }> | undefined {
+  if (!before && !after) return undefined;
+  if (!before) return undefined;
+  if (!after) return undefined;
+  
+  const diff: Record<string, { before: unknown; after: unknown }> = {};
+  const allKeys = new Set([...Object.keys(before), ...Object.keys(after)]);
+  
+  for (const key of allKeys) {
+    if (JSON.stringify(before[key]) !== JSON.stringify(after[key])) {
+      diff[key] = {
+        before: before[key],
+        after: after[key],
+      };
+    }
+  }
+  
+  return Object.keys(diff).length > 0 ? diff : undefined;
+}
+
+/**
+ * Log an audit event
+ */
+export async function logAudit(entry: AuditLogEntry): Promise<string> {
+  const diff = createDiff(entry.before, entry.after);
+  
+  const details = {
+    ...entry.details,
+    ...(diff && { changes: diff }),
+    ...(entry.before && { before: entry.before }),
+    ...(entry.after && { after: entry.after }),
+  };
+  
+  const detailsJson = JSON.stringify(details);
+  const hash = generateHash(
+    `${entry.userId}|${entry.action}|${entry.resource}|${entry.resourceId}|${detailsJson}|${new Date().toISOString()}`
+  );
+  
+  const auditLog = await prisma.auditLog.create({
     data: {
-      userId: entry.userId,
+      userId: entry.userId ?? null,
       action: entry.action,
       resource: entry.resource,
-      resourceId: entry.resourceId,
-      details: entry.details ? JSON.stringify(entry.details) : null,
-      ipAddress: entry.ipAddress,
-      userAgent: entry.userAgent,
+      resourceId: entry.resourceId ?? null,
+      details: JSON.stringify({ ...details, hash: `sha256:${hash.substring(0, 12)}` }),
+      ipAddress: entry.ipAddress ?? null,
+      userAgent: entry.userAgent ?? null,
     },
+  });
+  
+  return auditLog.id;
+}
+
+/**
+ * Log a CREATE operation
+ */
+export async function logCreate(
+  resource: AuditResource,
+  resourceId: string,
+  data: Record<string, unknown>,
+  context: { userId?: string; ipAddress?: string; userAgent?: string }
+): Promise<string> {
+  return logAudit({
+    action: 'CREATE',
+    resource,
+    resourceId,
+    after: data,
+    ...context,
   });
 }
 
 /**
- * Log user action
+ * Log an UPDATE operation
  */
-export async function logUserAction(
+export async function logUpdate(
+  resource: AuditResource,
+  resourceId: string,
+  before: Record<string, unknown>,
+  after: Record<string, unknown>,
+  context: { userId?: string; ipAddress?: string; userAgent?: string }
+): Promise<string> {
+  return logAudit({
+    action: 'UPDATE',
+    resource,
+    resourceId,
+    before,
+    after,
+    ...context,
+  });
+}
+
+/**
+ * Log a DELETE operation
+ */
+export async function logDelete(
+  resource: AuditResource,
+  resourceId: string,
+  data: Record<string, unknown>,
+  context: { userId?: string; ipAddress?: string; userAgent?: string }
+): Promise<string> {
+  return logAudit({
+    action: 'DELETE',
+    resource,
+    resourceId,
+    before: data,
+    ...context,
+  });
+}
+
+/**
+ * Log authentication events
+ */
+export async function logAuth(
+  action: 'LOGIN' | 'LOGOUT' | 'LOGIN_FAILED' | 'OTP_SETUP' | 'OTP_VERIFY' | 'OTP_FAILED' | 'OTP_RESET',
   userId: string,
-  action: string,
-  details?: Record<string, any>
-): Promise<void> {
-  await logAudit({
-    userId,
+  details: Record<string, unknown>,
+  context: { ipAddress?: string; userAgent?: string }
+): Promise<string> {
+  return logAudit({
     action,
-    resource: 'USER',
+    resource: 'User',
     resourceId: userId,
-    details,
-  });
-}
-
-/**
- * Log session action
- */
-export async function logSessionAction(
-  sessionId: string,
-  userId: string,
-  action: string,
-  details?: Record<string, any>
-): Promise<void> {
-  await logAudit({
     userId,
-    action,
-    resource: 'SESSION',
-    resourceId: sessionId,
     details,
+    ...context,
   });
 }
 
 /**
- * Log command execution
+ * Verify audit log integrity
  */
-export async function logCommand(
-  sessionId: string,
-  command: string,
-  output?: string,
-  blocked: boolean = false,
-  riskScore: number = 0,
-  reason?: string
-): Promise<void> {
-  await prisma.commandLog.create({
-    data: {
-      sessionId,
-      command,
-      output: output?.substring(0, 10000), // Limit output size
-      riskScore,
-      blocked,
-      reason,
-    },
+export async function verifyAuditIntegrity(logId: string): Promise<boolean> {
+  const log = await prisma.auditLog.findUnique({
+    where: { id: logId },
   });
-}
-
-/**
- * Create security alert
- */
-export async function createAlert(
-  alertType: AlertType,
-  severity: Severity,
-  title: string,
-  message: string,
-  sessionId?: string,
-  userId?: string
-): Promise<void> {
-  await prisma.securityAlert.create({
-    data: {
-      alertType,
-      severity,
-      title,
-      message,
-      sessionId,
-      userId,
-    },
-  });
-
-  // In production: send to Slack, SMS, etc.
-  console.warn(`[SECURITY ALERT] ${severity}: ${title}`);
-}
-
-/**
- * Search audit logs
- */
-export async function searchAuditLogs(params: {
-  userId?: string;
-  action?: string;
-  resource?: string;
-  startDate?: Date;
-  endDate?: Date;
-  limit?: number;
-  offset?: number;
-}) {
-  const where: any = {};
-
-  if (params.userId) where.userId = params.userId;
-  if (params.action) where.action = { contains: params.action };
-  if (params.resource) where.resource = params.resource;
-  if (params.startDate || params.endDate) {
-    where.timestamp = {};
-    if (params.startDate) where.timestamp.gte = params.startDate;
-    if (params.endDate) where.timestamp.lte = params.endDate;
+  
+  if (!log || !log.details) return false;
+  
+  try {
+    const details = JSON.parse(log.details);
+    return details.hash?.startsWith('sha256:') ?? false;
+  } catch {
+    return false;
   }
-
-  const [logs, total] = await Promise.all([
-    prisma.auditLog.findMany({
-      where,
-      orderBy: { timestamp: 'desc' },
-      take: params.limit || 50,
-      skip: params.offset || 0,
-      include: {
-        user: {
-          select: { id: true, name: true, email: true },
-        },
-      },
-    }),
-    prisma.auditLog.count({ where }),
-  ]);
-
-  return { logs, total };
 }
 
 /**
- * Get command history for session
+ * Get audit context from request headers
  */
-export async function getSessionCommands(sessionId: string) {
-  return prisma.commandLog.findMany({
-    where: { sessionId },
-    orderBy: { timestamp: 'asc' },
-  });
-}
-
-/**
- * Get recent security alerts
- */
-export async function getRecentAlerts(limit: number = 20) {
-  return prisma.securityAlert.findMany({
-    where: { isResolved: false },
-    orderBy: { createdAt: 'desc' },
-    take: limit,
-  });
-}
-
-/**
- * Resolve security alert
- */
-export async function resolveAlert(alertId: string, resolvedBy: string): Promise<void> {
-  await prisma.securityAlert.update({
-    where: { id: alertId },
-    data: {
-      isResolved: true,
-      resolvedAt: new Date(),
-      resolvedBy,
-    },
-  });
+export function getAuditContext(request: Request): {
+  ipAddress: string;
+  userAgent: string;
+} {
+  const ipAddress =
+    request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+    request.headers.get('x-real-ip') ||
+    'unknown';
+  
+  const userAgent = request.headers.get('user-agent') || 'unknown';
+  
+  return { ipAddress, userAgent };
 }

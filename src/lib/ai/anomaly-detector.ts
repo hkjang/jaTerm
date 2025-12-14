@@ -8,7 +8,7 @@ interface BehaviorStats {
   commonServers: string[];
 }
 
-interface AnomalyResult {
+export interface AnomalyResult {
   isAnomaly: boolean;
   anomalyScore: number;
   reasons: string[];
@@ -91,9 +91,9 @@ export class AnomalyDetector {
       ? JSON.parse(existing.accessPattern) 
       : { hours: [] };
 
-    // Merge and limit
-    const newCommands = [...new Set([...currentCommands, ...sessionData.commands])].slice(0, 100);
-    const newServers = [...new Set([...currentServers, sessionData.serverId])].slice(0, 20);
+    // Merge and limit (using Array.from for ES5 compatibility)
+    const newCommands = Array.from(new Set([...currentCommands, ...sessionData.commands])).slice(0, 100);
+    const newServers = Array.from(new Set([...currentServers, sessionData.serverId])).slice(0, 20);
     currentPattern.hours = [...currentPattern.hours, sessionData.accessHour].slice(-100);
 
     const newAvgDuration = (existing.avgSessionDuration || 0) * 0.8 + sessionData.duration * 0.2;

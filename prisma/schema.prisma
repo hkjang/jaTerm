@@ -19,12 +19,24 @@ model User {
   email         String    @unique
   name          String?
   password      String
-  role          String    @default("USER") // ADMIN, OPERATOR, DEVELOPER, VIEWER, USER
+  role          String    @default("USER") // SUPER, ADMIN, OPERATOR, DEVELOPER, VIEWER, USER
   department    String?
-  mfaEnabled    Boolean   @default(false)
-  mfaSecret     String?
+  
+  // MFA/OTP Fields
+  mfaEnabled       Boolean   @default(false)
+  mfaSecret        String?
+  mfaBackupCodes   String?   // JSON array of hashed backup codes
+  mfaFailCount     Int       @default(0)
+  mfaLockedUntil   DateTime?
+  mfaResetAt       DateTime?
+  mfaResetBy       String?   // Admin user ID who reset
+  requireMfaSetup  Boolean   @default(true) // Force OTP setup on first login
+  
+  // Login tracking
   lastLoginAt   DateTime?
   lastLoginIp   String?
+  loginFailCount Int       @default(0)
+  
   isActive      Boolean   @default(true)
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt

@@ -172,7 +172,7 @@ export async function getCommandFilterForPolicy(policyId: string): Promise<Comma
     ? JSON.parse(policy.commandPatterns) 
     : [];
 
-  return new CommandFilter(policy.commandMode, patterns);
+  return new CommandFilter(policy.commandMode as CommandMode, patterns);
 }
 
 /**

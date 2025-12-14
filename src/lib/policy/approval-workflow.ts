@@ -1,5 +1,7 @@
 import { prisma } from '@/lib/db';
-import type { ApprovalStatus } from '@prisma/client';
+
+// Local type definition
+export type ApprovalStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'EXPIRED';
 
 export interface ApprovalRequestInput {
   requesterId: string;

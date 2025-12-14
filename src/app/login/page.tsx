@@ -11,6 +11,9 @@ export default function LoginPage() {
   const [showMfa, setShowMfa] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [remainingAttempts, setRemainingAttempts] = useState<number | null>(null);
+  const [lockedUntil, setLockedUntil] = useState<Date | null>(null);
   const router = useRouter();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -19,51 +22,77 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      // Demo mode: simple validation
-      if (email === 'admin@jaterm.com' && password === 'admin123') {
-        // Show MFA step
-        if (!showMfa) {
+      // Step 1: Verify credentials
+      const authResponse = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password, mfaCode: showMfa ? mfaCode : undefined }),
+      });
+
+      const authData = await authResponse.json();
+
+      if (!authResponse.ok) {
+        if (authData.requireMfa) {
+          // User authenticated, but needs MFA
+          setUserId(authData.userId);
           setShowMfa(true);
           setLoading(false);
           return;
         }
-        
-        // Verify MFA (demo: any 6-digit code works)
-        if (mfaCode.length === 6) {
+
+        if (authData.requireMfaSetup) {
+          // User needs to set up MFA
           localStorage.setItem('user', JSON.stringify({
-            id: '1',
-            email: 'admin@jaterm.com',
-            name: 'Admin User',
-            role: 'ADMIN'
+            id: authData.userId,
+            email: authData.email,
+            name: authData.name,
+            role: authData.role,
           }));
-          router.push('/terminal');
-        } else {
-          setError('유효하지 않은 MFA 코드입니다.');
+          router.push('/otp-setup');
+          return;
         }
-      } else if (email === 'operator@jaterm.com' && password === 'operator123') {
-        localStorage.setItem('user', JSON.stringify({
-          id: '2',
-          email: 'operator@jaterm.com',
-          name: 'Operator User',
-          role: 'OPERATOR'
-        }));
-        router.push('/terminal');
-      } else if (email === 'dev@jaterm.com' && password === 'dev123') {
-        localStorage.setItem('user', JSON.stringify({
-          id: '3',
-          email: 'dev@jaterm.com',
-          name: 'Developer User',
-          role: 'DEVELOPER'
-        }));
-        router.push('/terminal');
-      } else {
-        setError('이메일 또는 비밀번호가 올바르지 않습니다.');
+
+        if (authData.locked) {
+          setLockedUntil(new Date(authData.lockedUntil));
+          setError(`계정이 잠겼습니다. ${new Date(authData.lockedUntil).toLocaleTimeString()} 이후에 다시 시도하세요.`);
+          setLoading(false);
+          return;
+        }
+
+        if (authData.remainingAttempts !== undefined) {
+          setRemainingAttempts(authData.remainingAttempts);
+          setError(`인증에 실패했습니다. 남은 시도 횟수: ${authData.remainingAttempts}회`);
+          setLoading(false);
+          return;
+        }
+
+        setError(authData.error || '로그인에 실패했습니다.');
+        setLoading(false);
+        return;
       }
+
+      // Login successful
+      localStorage.setItem('user', JSON.stringify({
+        id: authData.id,
+        email: authData.email,
+        name: authData.name,
+        role: authData.role,
+      }));
+      
+      router.push('/terminal');
     } catch (err) {
       setError('로그인 중 오류가 발생했습니다.');
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleBackToLogin = () => {
+    setShowMfa(false);
+    setMfaCode('');
+    setUserId(null);
+    setRemainingAttempts(null);
+    setError('');
   };
 
   return (
@@ -135,7 +164,7 @@ export default function LoginPage() {
                   <div>
                     <div style={{ fontWeight: 600 }}>2단계 인증</div>
                     <div style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
-                      인증 앱의 6자리 코드를 입력하세요
+                      인증 앱의 6자리 코드 또는 백업 코드를 입력하세요
                     </div>
                   </div>
                 </div>
@@ -143,17 +172,34 @@ export default function LoginPage() {
                   type="text"
                   className="form-input"
                   value={mfaCode}
-                  onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                  placeholder="000000"
+                  onChange={(e) => setMfaCode(e.target.value.replace(/[^A-Za-z0-9]/g, '').slice(0, 8))}
+                  placeholder="000000 또는 백업코드"
                   style={{ 
                     textAlign: 'center',
                     fontSize: '1.5rem',
-                    letterSpacing: '0.3em',
+                    letterSpacing: '0.2em',
                     fontFamily: 'var(--font-mono)'
                   }}
-                  maxLength={6}
+                  maxLength={8}
                   autoFocus
                 />
+                {remainingAttempts !== null && remainingAttempts < 5 && (
+                  <div style={{ 
+                    marginTop: '8px',
+                    fontSize: '0.85rem',
+                    color: remainingAttempts <= 2 ? 'var(--color-danger)' : 'var(--color-warning)'
+                  }}>
+                    ⚠️ 남은 시도 횟수: {remainingAttempts}회
+                  </div>
+                )}
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  style={{ marginTop: '12px', width: '100%' }}
+                  onClick={handleBackToLogin}
+                >
+                  ← 이메일/비밀번호 다시 입력
+                </button>
               </div>
             )}
 
@@ -163,11 +209,21 @@ export default function LoginPage() {
               </div>
             )}
 
+            {lockedUntil && (
+              <div className="alert alert-warning" style={{ marginBottom: '20px' }}>
+                <strong>계정 잠금</strong>
+                <br />
+                너무 많은 시도로 인해 계정이 일시적으로 잠겼습니다.
+                <br />
+                {lockedUntil.toLocaleTimeString()} 이후에 다시 시도하세요.
+              </div>
+            )}
+
             <button 
               type="submit" 
               className="btn btn-primary btn-lg"
               style={{ width: '100%' }}
-              disabled={loading}
+              disabled={loading || (lockedUntil && new Date() < lockedUntil)}
             >
               {loading && <span className="spinner" style={{ width: '18px', height: '18px' }} />}
               {showMfa ? '인증 확인' : '로그인'}
@@ -185,7 +241,7 @@ export default function LoginPage() {
           </div>
           <div style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
             <div style={{ marginBottom: '8px' }}>
-              <strong>Admin:</strong> admin@jaterm.com / admin123 + MFA
+              <strong>Admin:</strong> admin@jaterm.com / admin123
             </div>
             <div style={{ marginBottom: '8px' }}>
               <strong>Operator:</strong> operator@jaterm.com / operator123

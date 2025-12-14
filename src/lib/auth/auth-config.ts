@@ -85,13 +85,13 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
 // Type extensions
 declare module 'next-auth' {
   interface User {
-    role?: string;
-  }
-}
-
-declare module '@auth/core/jwt' {
-  interface JWT {
     id?: string;
     role?: string;
+  }
+  interface Session {
+    user: User & {
+      id?: string;
+      role?: string;
+    };
   }
 }

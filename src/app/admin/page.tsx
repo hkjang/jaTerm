@@ -2,8 +2,9 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import AdminSidebar from '@/components/admin/AdminSidebar';
 
-// Mock data
+// Mock real-time data
 const mockStats = {
   activeUsers: 24,
   activeSessions: 12,
@@ -11,6 +12,11 @@ const mockStats = {
   blockedCommands: 3,
   securityAlerts: 2,
   approvalsPending: 5,
+  // New metrics
+  commandsToday: 1847,
+  avgResponseTime: 23,
+  serverLoad: 67,
+  slaCompliance: 99.7,
 };
 
 const mockRecentSessions = [
@@ -25,13 +31,11 @@ const mockAlerts = [
 ];
 
 export default function AdminDashboard() {
-  const [user, setUser] = useState<any>(null);
+  const [currentTime, setCurrentTime] = useState(new Date());
 
   useEffect(() => {
-    const storedUser = localStorage.getItem('user');
-    if (storedUser) {
-      setUser(JSON.parse(storedUser));
-    }
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+    return () => clearInterval(timer);
   }, []);
 
   const formatDuration = (startedAt: Date) => {
@@ -43,131 +47,67 @@ export default function AdminDashboard() {
 
   return (
     <div className="page-container" style={{ flexDirection: 'row' }}>
-      {/* Sidebar */}
-      <aside className="sidebar" style={{ position: 'relative', height: '100vh' }}>
-        <div style={{ 
-          padding: '16px',
-          borderBottom: '1px solid var(--color-border)',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '10px'
-        }}>
-          <div className="header-logo-icon" style={{ width: '32px', height: '32px', fontSize: '1rem' }}>⌘</div>
-          <span style={{ fontWeight: 600 }}>jaTerm Admin</span>
-        </div>
+      <AdminSidebar />
 
-        <nav className="sidebar-nav">
-          <div className="sidebar-section">
-            <div className="sidebar-section-title">Overview</div>
-            <Link href="/admin" className="sidebar-link active">
-              <span className="sidebar-link-icon">📊</span>
-              <span>대시보드</span>
-            </Link>
-          </div>
-
-          <div className="sidebar-section">
-            <div className="sidebar-section-title">Management</div>
-            <Link href="/admin/users" className="sidebar-link">
-              <span className="sidebar-link-icon">👥</span>
-              <span>사용자 관리</span>
-            </Link>
-            <Link href="/admin/servers" className="sidebar-link">
-              <span className="sidebar-link-icon">🖥️</span>
-              <span>서버 관리</span>
-            </Link>
-            <Link href="/admin/policies" className="sidebar-link">
-              <span className="sidebar-link-icon">📋</span>
-              <span>정책 관리</span>
-            </Link>
-          </div>
-
-          <div className="sidebar-section">
-            <div className="sidebar-section-title">Monitoring</div>
-            <Link href="/admin/sessions" className="sidebar-link">
-              <span className="sidebar-link-icon">📺</span>
-              <span>세션 관제</span>
-              <span className="badge badge-success" style={{ marginLeft: 'auto' }}>{mockStats.activeSessions}</span>
-            </Link>
-            <Link href="/admin/audit" className="sidebar-link">
-              <span className="sidebar-link-icon">📝</span>
-              <span>감사 로그</span>
-            </Link>
-            <Link href="/admin/alerts" className="sidebar-link">
-              <span className="sidebar-link-icon">🚨</span>
-              <span>보안 알림</span>
-              {mockStats.securityAlerts > 0 && (
-                <span className="badge badge-danger" style={{ marginLeft: 'auto' }}>{mockStats.securityAlerts}</span>
-              )}
-            </Link>
-          </div>
-
-          <div className="sidebar-section">
-            <div className="sidebar-section-title">Workflow</div>
-            <Link href="/admin/approvals" className="sidebar-link">
-              <span className="sidebar-link-icon">✅</span>
-              <span>승인 요청</span>
-              {mockStats.approvalsPending > 0 && (
-                <span className="badge badge-warning" style={{ marginLeft: 'auto' }}>{mockStats.approvalsPending}</span>
-              )}
-            </Link>
-          </div>
-        </nav>
-
-        <div style={{ 
-          position: 'absolute',
-          bottom: 0,
-          left: 0,
-          right: 0,
-          padding: '16px',
-          borderTop: '1px solid var(--color-border)'
-        }}>
-          <Link href="/terminal" className="btn btn-secondary btn-sm" style={{ width: '100%' }}>
-            터미널로 이동
-          </Link>
-        </div>
-      </aside>
-
-      {/* Main Content */}
-      <main style={{ 
-        flex: 1, 
-        marginLeft: 'var(--sidebar-width)',
-        padding: '24px',
-        overflow: 'auto'
-      }}>
+      <main style={{ flex: 1, marginLeft: 'var(--sidebar-width)', padding: '24px', overflow: 'auto' }}>
         {/* Header */}
-        <div style={{ marginBottom: '32px' }}>
-          <h1 style={{ fontSize: '1.5rem', fontWeight: 600, marginBottom: '8px' }}>관리자 대시보드</h1>
-          <p style={{ color: 'var(--color-text-secondary)' }}>시스템 현황 및 보안 모니터링</p>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '32px' }}>
+          <div>
+            <h1 style={{ fontSize: '1.5rem', fontWeight: 600, marginBottom: '8px' }}>관리자 대시보드</h1>
+            <p style={{ color: 'var(--color-text-secondary)' }}>시스템 현황 및 보안 모니터링</p>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+            <div style={{ fontSize: '0.9rem', color: 'var(--color-text-muted)' }}>
+              {currentTime.toLocaleString()}
+            </div>
+            <span className="badge badge-success">● 시스템 정상</span>
+          </div>
         </div>
 
-        {/* Stats Grid */}
-        <div className="dashboard-grid" style={{ marginBottom: '32px' }}>
+        {/* Main Stats Grid */}
+        <div className="dashboard-grid" style={{ marginBottom: '24px', gridTemplateColumns: 'repeat(6, 1fr)' }}>
           <div className="stat-card">
-            <div className="stat-label">활성 사용자</div>
-            <div className="stat-value">{mockStats.activeUsers}</div>
-            <div className="stat-change positive">↑ 12% vs 지난주</div>
+            <div className="stat-label">동시 세션</div>
+            <div className="stat-value" style={{ color: 'var(--color-success)' }}>{mockStats.activeSessions}</div>
+            <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '4px' }}>실시간</div>
           </div>
-
           <div className="stat-card">
-            <div className="stat-label">활성 세션</div>
-            <div className="stat-value">{mockStats.activeSessions}</div>
-            <div className="stat-change positive">실시간</div>
+            <div className="stat-label">명령 실행</div>
+            <div className="stat-value">{mockStats.commandsToday.toLocaleString()}</div>
+            <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '4px' }}>오늘</div>
           </div>
-
           <div className="stat-card">
-            <div className="stat-label">등록된 서버</div>
-            <div className="stat-value">{mockStats.totalServers}</div>
-            <div style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginTop: '8px' }}>
-              PROD: 5 | STAGE: 4 | DEV: 6
+            <div className="stat-label">차단 건수</div>
+            <div className="stat-value" style={{ color: 'var(--color-danger)' }}>{mockStats.blockedCommands}</div>
+            <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '4px' }}>오늘</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">서버 부하</div>
+            <div className="stat-value">{mockStats.serverLoad}%</div>
+            <div style={{ height: '4px', background: 'var(--color-surface)', borderRadius: '2px', marginTop: '8px' }}>
+              <div style={{ width: `${mockStats.serverLoad}%`, height: '100%', background: mockStats.serverLoad > 80 ? 'var(--color-danger)' : 'var(--color-success)', borderRadius: '2px' }} />
             </div>
           </div>
-
           <div className="stat-card">
-            <div className="stat-label">차단된 명령</div>
-            <div className="stat-value">{mockStats.blockedCommands}</div>
-            <div className="stat-change" style={{ color: 'var(--color-danger)' }}>오늘</div>
+            <div className="stat-label">AI 경고</div>
+            <div className="stat-value" style={{ color: mockStats.securityAlerts > 0 ? 'var(--color-warning)' : 'var(--color-success)' }}>{mockStats.securityAlerts}</div>
+            <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '4px' }}>미해결</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">SLA</div>
+            <div className="stat-value" style={{ color: 'var(--color-success)' }}>{mockStats.slaCompliance}%</div>
+            <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '4px' }}>응답 {mockStats.avgResponseTime}ms</div>
           </div>
         </div>
+
+        {/* Approval Pending Banner */}
+        {mockStats.approvalsPending > 0 && (
+          <div className="alert alert-warning" style={{ marginBottom: '24px' }}>
+            <span>⏳</span>
+            <span>대기 중인 승인 요청 {mockStats.approvalsPending}건</span>
+            <Link href="/admin/approvals" className="btn btn-warning btn-sm" style={{ marginLeft: 'auto' }}>처리하기</Link>
+          </div>
+        )}
 
         {/* Two Column Layout */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
@@ -180,25 +120,14 @@ export default function AdminDashboard() {
             
             <div className="table-container">
               <table className="table">
-                <thead>
-                  <tr>
-                    <th>사용자</th>
-                    <th>서버</th>
-                    <th>시간</th>
-                    <th>상태</th>
-                  </tr>
-                </thead>
+                <thead><tr><th>사용자</th><th>서버</th><th>시간</th><th>상태</th></tr></thead>
                 <tbody>
                   {mockRecentSessions.map(session => (
                     <tr key={session.id}>
                       <td style={{ fontWeight: 500 }}>{session.user.split('@')[0]}</td>
                       <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem' }}>{session.server}</td>
                       <td>{formatDuration(session.startedAt)}</td>
-                      <td>
-                        <span className={`badge badge-${session.status === 'ACTIVE' ? 'success' : 'info'}`}>
-                          {session.status}
-                        </span>
-                      </td>
+                      <td><span className={`badge badge-${session.status === 'ACTIVE' ? 'success' : 'info'}`}>{session.status}</span></td>
                     </tr>
                   ))}
                 </tbody>
@@ -215,31 +144,17 @@ export default function AdminDashboard() {
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               {mockAlerts.map(alert => (
-                <div 
-                  key={alert.id}
-                  className={`alert alert-${alert.severity === 'CRITICAL' ? 'danger' : 'warning'}`}
-                >
-                  <span style={{ fontSize: '1.2rem' }}>
-                    {alert.severity === 'CRITICAL' ? '⛔' : '⚠️'}
-                  </span>
+                <div key={alert.id} className={`alert alert-${alert.severity === 'CRITICAL' ? 'danger' : 'warning'}`}>
+                  <span style={{ fontSize: '1.2rem' }}>{alert.severity === 'CRITICAL' ? '⛔' : '⚠️'}</span>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontWeight: 500, marginBottom: '4px' }}>{alert.message}</div>
-                    <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
-                      {alert.type} • {new Date(alert.time).toLocaleTimeString()}
-                    </div>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>{alert.type} • {new Date(alert.time).toLocaleTimeString()}</div>
                   </div>
                   <button className="btn btn-ghost btn-sm">처리</button>
                 </div>
               ))}
-
               {mockAlerts.length === 0 && (
-                <div style={{ 
-                  textAlign: 'center', 
-                  padding: '40px',
-                  color: 'var(--color-text-muted)'
-                }}>
-                  현재 알림이 없습니다
-                </div>
+                <div style={{ textAlign: 'center', padding: '40px', color: 'var(--color-text-muted)' }}>현재 알림이 없습니다</div>
               )}
             </div>
           </div>
@@ -247,22 +162,14 @@ export default function AdminDashboard() {
 
         {/* Quick Actions */}
         <div className="card" style={{ marginTop: '24px' }}>
-          <div className="card-header">
-            <h2 className="card-title">빠른 작업</h2>
-          </div>
+          <div className="card-header"><h2 className="card-title">빠른 작업</h2></div>
           <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-            <Link href="/admin/users" className="btn btn-secondary">
-              👥 사용자 추가
-            </Link>
-            <Link href="/admin/servers" className="btn btn-secondary">
-              🖥️ 서버 등록
-            </Link>
-            <Link href="/admin/policies" className="btn btn-secondary">
-              📋 정책 생성
-            </Link>
-            <Link href="/admin/audit" className="btn btn-secondary">
-              📝 로그 검색
-            </Link>
+            <Link href="/admin/users" className="btn btn-secondary">👥 사용자 추가</Link>
+            <Link href="/admin/servers" className="btn btn-secondary">🖥️ 서버 등록</Link>
+            <Link href="/admin/policies" className="btn btn-secondary">📋 정책 생성</Link>
+            <Link href="/admin/commands" className="btn btn-secondary">⌨️ 명령 통제</Link>
+            <Link href="/admin/audit" className="btn btn-secondary">📝 로그 검색</Link>
+            <Link href="/admin/compliance" className="btn btn-secondary">✓ 컴플라이언스</Link>
           </div>
         </div>
       </main>

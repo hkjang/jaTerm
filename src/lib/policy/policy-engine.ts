@@ -1,5 +1,8 @@
 import { prisma } from '@/lib/db';
-import type { Role, Environment } from '@prisma/client';
+
+// Local type definitions (matching Prisma schema if exists)
+export type Role = 'ADMIN' | 'OPERATOR' | 'DEVELOPER' | 'VIEWER' | 'USER';
+export type Environment = 'PROD' | 'STAGE' | 'DEV';
 
 export interface AccessRequest {
   userId: string;
@@ -95,7 +98,7 @@ export class PolicyEngine {
 
     // Evaluate each policy
     for (const policy of policies) {
-      const decision = this.evaluatePolicy(policy, request, user.role);
+      const decision = this.evaluatePolicy(policy, request, user.role as Role);
       if (decision !== null) {
         return decision;
       }
