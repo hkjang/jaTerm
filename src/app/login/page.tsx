@@ -223,7 +223,7 @@ export default function LoginPage() {
               type="submit" 
               className="btn btn-primary btn-lg"
               style={{ width: '100%' }}
-              disabled={loading || (lockedUntil && new Date() < lockedUntil)}
+              disabled={loading || Boolean(lockedUntil && new Date() < lockedUntil)}
             >
               {loading && <span className="spinner" style={{ width: '18px', height: '18px' }} />}
               {showMfa ? '인증 확인' : '로그인'}

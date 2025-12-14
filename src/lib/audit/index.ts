@@ -1,16 +1,15 @@
 export {
   logAudit,
-  logUserAction,
-  logSessionAction,
-  logCommand,
+  logCreate,
+  logUpdate,
+  logDelete,
+  logAuth,
+  getAuditContext,
+  verifyAuditIntegrity,
   createAlert,
-  searchAuditLogs,
-  getSessionCommands,
-  getRecentAlerts,
-  resolveAlert,
 } from './audit-logger';
 
-export type { AuditEntry } from './audit-logger';
+export type { AuditAction, AuditResource, AuditLogEntry } from './audit-logger';
 
 export {
   SessionRecorder,
@@ -19,3 +18,4 @@ export {
   getRecorder,
   removeRecorder,
 } from './session-recorder';
+

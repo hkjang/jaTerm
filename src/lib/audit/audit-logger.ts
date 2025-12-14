@@ -65,7 +65,7 @@ function createDiff(
   if (!after) return undefined;
   
   const diff: Record<string, { before: unknown; after: unknown }> = {};
-  const allKeys = new Set([...Object.keys(before), ...Object.keys(after)]);
+  const allKeys = Array.from(new Set([...Object.keys(before), ...Object.keys(after)]));
   
   for (const key of allKeys) {
     if (JSON.stringify(before[key]) !== JSON.stringify(after[key])) {
@@ -221,3 +221,29 @@ export function getAuditContext(request: Request): {
   
   return { ipAddress, userAgent };
 }
+
+/**
+ * Create a security alert (for AI modules compatibility)
+ */
+export async function createAlert(
+  type: string,
+  severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL',
+  title: string,
+  description: string,
+  sessionId?: string,
+  userId?: string
+): Promise<string> {
+  return logAudit({
+    action: 'COMMAND_BLOCKED',
+    resource: 'TerminalSession',
+    resourceId: sessionId,
+    userId,
+    details: {
+      alertType: type,
+      severity,
+      title,
+      description,
+    },
+  });
+}
+

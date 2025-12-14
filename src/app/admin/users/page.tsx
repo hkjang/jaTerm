@@ -43,7 +43,7 @@ export default function UsersPage() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
-  const getAuthHeaders = () => {
+  const getAuthHeaders = (): Record<string, string> => {
     const user = localStorage.getItem('user');
     if (!user) return {};
     const { id } = JSON.parse(user);
