@@ -65,7 +65,12 @@ const navSections: NavSection[] = [
     title: 'AI',
     items: [
       { href: '/admin/alerts', label: '보안 알림', icon: '🔔' },
-      { href: '/admin/ai-security', label: 'AI 보안', icon: '🤖' },
+      { href: '/admin/ai-security', label: 'AI 보안', icon: '🛡️' },
+      { href: '/admin/ai-providers', label: 'AI Provider', icon: '🔌' },
+      { href: '/admin/ai-models', label: 'AI 모델', icon: '🧠' },
+      { href: '/admin/ai-prompts', label: '프롬프트', icon: '📝' },
+      { href: '/admin/ai-policies', label: 'AI 정책', icon: '📋' },
+      { href: '/admin/ai-logs', label: 'AI 로그', icon: '📊' },
     ],
   },
   {

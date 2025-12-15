@@ -38,7 +38,16 @@ export async function POST(request: NextRequest) {
     });
 
     if (!user) {
-      await logAuth('LOGIN_FAILED', '', { reason: 'user_not_found', email }, context);
+      // Log without userId for non-existent users (to avoid FK constraint)
+      await prisma.auditLog.create({
+        data: {
+          action: 'LOGIN_FAILED',
+          resource: 'User',
+          details: JSON.stringify({ reason: 'user_not_found', email }),
+          ipAddress: context.ipAddress,
+          userAgent: context.userAgent,
+        },
+      });
       return NextResponse.json(
         { error: 'Invalid email or password' },
         { status: 401 }

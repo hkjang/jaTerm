@@ -494,3 +494,101 @@ model BroadcastResult {
 
   @@index([executionId])
 }
+
+// ============================================
+// AI Integration Models
+// ============================================
+
+model AIProvider {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  type        String   // OLLAMA, VLLM
+  baseUrl     String
+  apiKey      String?  // 암호화 저장
+  isActive    Boolean  @default(false)
+  isDefault   Boolean  @default(false)
+  timeout     Int      @default(30000)  // ms
+  maxTokens   Int      @default(4096)
+  streaming   Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  models AIModel[]
+
+  @@index([isActive])
+  @@index([type])
+}
+
+model AIModel {
+  id          String   @id @default(cuid())
+  providerId  String
+  name        String
+  displayName String?
+  description String?
+  maxTokens   Int      @default(4096)
+  isActive    Boolean  @default(true)
+  isDefault   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  provider AIProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, name])
+  @@index([isActive])
+}
+
+model PromptTemplate {
+  id           String   @id @default(cuid())
+  name         String   @unique
+  category     String   // COMMAND_EXPLAIN, COMMAND_GENERATE, RISK_ANALYSIS, LOG_SUMMARY
+  template     String
+  variables    String?  // JSON array of variable names
+  allowedRoles String?  // JSON array: ["ADMIN", "OPERATOR"]
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([category])
+  @@index([isActive])
+}
+
+model AIPolicy {
+  id              String   @id @default(cuid())
+  name            String   @unique
+  description     String?
+  allowedFeatures String   // JSON: ["explain", "generate", "analyze"]
+  rateLimit       Int      @default(100) // 시간당 호출 제한
+  promptMaxLength Int      @default(2000)
+  allowedRoles    String   // JSON array
+  riskThreshold   Float    @default(0.7)
+  autoBlock       Boolean  @default(false)
+  resultMasking   Boolean  @default(false)
+  timeRestriction String?  // JSON: {start: "09:00", end: "18:00"}
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([isActive])
+}
+
+model AIAuditLog {
+  id             String   @id @default(cuid())
+  userId         String
+  providerId     String?
+  providerName   String?
+  modelName      String?
+  feature        String   // explain, generate, analyze, summarize
+  promptHash     String   // SHA-256 hash (원문 미저장)
+  promptLength   Int
+  responseTokens Int?
+  durationMs     Int?
+  status         String   // success, failed, blocked
+  errorMessage   String?
+  ipAddress      String?
+  timestamp      DateTime @default(now())
+
+  @@index([userId])
+  @@index([timestamp])
+  @@index([feature])
+  @@index([status])
+}

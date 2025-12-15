@@ -13,22 +13,27 @@ async function main() {
 
   const admin = await prisma.user.upsert({
     where: { email: 'admin@jaterm.com' },
-    update: {},
+    update: {
+      requireMfaSetup: false, // Ensure existing users don't require MFA setup
+    },
     create: {
       email: 'admin@jaterm.com',
       name: '관리자',
       password: adminPassword,
       role: 'ADMIN',
       department: '보안팀',
-      mfaEnabled: true,
+      mfaEnabled: false,
       mfaSecret: 'JBSWY3DPEHPK3PXP', // Demo secret
+      requireMfaSetup: false, // Already set up
       isActive: true,
     },
   });
 
   const operator = await prisma.user.upsert({
     where: { email: 'operator@jaterm.com' },
-    update: {},
+    update: {
+      requireMfaSetup: false, // Ensure existing users don't require MFA setup
+    },
     create: {
       email: 'operator@jaterm.com',
       name: '운영자',
@@ -36,13 +41,16 @@ async function main() {
       role: 'OPERATOR',
       department: '운영팀',
       mfaEnabled: false,
+      requireMfaSetup: false, // Demo: skip MFA for easier testing
       isActive: true,
     },
   });
 
   const developer = await prisma.user.upsert({
     where: { email: 'dev@jaterm.com' },
-    update: {},
+    update: {
+      requireMfaSetup: false, // Ensure existing users don't require MFA setup
+    },
     create: {
       email: 'dev@jaterm.com',
       name: '개발자',
@@ -50,6 +58,7 @@ async function main() {
       role: 'DEVELOPER',
       department: '개발팀',
       mfaEnabled: false,
+      requireMfaSetup: false, // Demo: skip MFA for easier testing
       isActive: true,
     },
   });
