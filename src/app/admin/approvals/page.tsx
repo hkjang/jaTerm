@@ -5,8 +5,8 @@ import AdminLayout from '@/components/admin/AdminLayout';
 
 interface ApprovalRequest {
   id: string;
-  requester: { name: string; email: string; role: string };
-  server: { name: string; environment: string };
+  requester: { id: string; name: string; email: string; role: string };
+  server: { id: string; name: string; environment: string };
   purpose: string;
   requestType: 'PRIOR' | 'REALTIME';
   status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'EXPIRED';
@@ -33,6 +33,13 @@ export default function ApprovalsPage() {
   const [rejectReason, setRejectReason] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  
+  // Batch selection
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [showBatchModal, setShowBatchModal] = useState(false);
+  const [batchAction, setBatchAction] = useState<'approve' | 'reject'>('approve');
+  const [batchLoading, setBatchLoading] = useState(false);
+  const [batchNotes, setBatchNotes] = useState('');
 
   const getAuthHeaders = (): Record<string, string> => {
     if (typeof window === 'undefined') return {};
@@ -65,6 +72,7 @@ export default function ApprovalsPage() {
       setRequests(data.requests);
       setPagination(data.pagination);
       setError('');
+      setSelectedIds(new Set());
     } catch (err) {
       setError('승인 요청 목록을 불러오는데 실패했습니다.');
       console.error('Fetch approvals error:', err);
@@ -114,6 +122,57 @@ export default function ApprovalsPage() {
     }
   };
 
+  const handleBatchAction = async () => {
+    if (selectedIds.size === 0) return;
+    
+    setBatchLoading(true);
+    try {
+      const promises = Array.from(selectedIds).map(id =>
+        fetch('/api/admin/approvals', {
+          method: 'PUT',
+          headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            id, 
+            action: batchAction,
+            notes: batchAction === 'reject' ? batchNotes : undefined,
+          }),
+        })
+      );
+
+      await Promise.all(promises);
+      
+      setSuccess(`${selectedIds.size}건의 요청이 ${batchAction === 'approve' ? '승인' : '거절'}되었습니다.`);
+      setShowBatchModal(false);
+      setBatchNotes('');
+      fetchRequests();
+    } catch (err) {
+      setError('일괄 처리에 실패했습니다.');
+    } finally {
+      setBatchLoading(false);
+    }
+  };
+
+  const toggleSelection = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    const pendingIds = requests.filter(r => r.status === 'PENDING').map(r => r.id);
+    if (selectedIds.size === pendingIds.length && pendingIds.length > 0) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(pendingIds));
+    }
+  };
+
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'PENDING': return { class: 'badge-warning', label: '대기중' };
@@ -124,15 +183,52 @@ export default function ApprovalsPage() {
     }
   };
 
+  const getEnvBadge = (env: string) => {
+    switch (env) {
+      case 'PROD': return 'badge-danger';
+      case 'STAGE': return 'badge-warning';
+      default: return 'badge-success';
+    }
+  };
+
+  const isEscalated = (request: ApprovalRequest) => {
+    if (request.status !== 'PENDING') return false;
+    const waitTime = Date.now() - new Date(request.requestedAt).getTime();
+    return waitTime > 30 * 60 * 1000; // 30 minutes
+  };
+
+  // Stats
   const pendingCount = requests.filter(r => r.status === 'PENDING').length;
   const approvedCount = requests.filter(r => r.status === 'APPROVED').length;
   const rejectedCount = requests.filter(r => r.status === 'REJECTED').length;
-  const expiredCount = requests.filter(r => r.status === 'EXPIRED').length;
+  const escalatedCount = requests.filter(isEscalated).length;
+  const pendingIds = requests.filter(r => r.status === 'PENDING').map(r => r.id);
 
   return (
     <AdminLayout
       title="승인 워크플로"
       description="사전/실시간 접근 승인 요청 관리"
+      actions={
+        <>
+          {selectedIds.size > 0 && (
+            <>
+              <button 
+                className="btn btn-success" 
+                onClick={() => { setBatchAction('approve'); setShowBatchModal(true); }}
+              >
+                ✓ 일괄 승인 ({selectedIds.size})
+              </button>
+              <button 
+                className="btn btn-danger" 
+                style={{ marginLeft: '8px' }}
+                onClick={() => { setBatchAction('reject'); setShowBatchModal(true); }}
+              >
+                ✗ 일괄 거절
+              </button>
+            </>
+          )}
+        </>
+      }
     >
       {/* Messages */}
       {success && (
@@ -148,11 +244,21 @@ export default function ApprovalsPage() {
         </div>
       )}
 
+      {/* Escalation Alert */}
+      {escalatedCount > 0 && (
+        <div className="alert alert-warning" style={{ marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <span style={{ fontSize: '1.2rem' }}>⏰</span>
+          <div>
+            <strong>{escalatedCount}건</strong>의 요청이 30분 이상 대기 중입니다. 신속한 처리가 필요합니다.
+          </div>
+        </div>
+      )}
+
       {/* Stats */}
       <div className="dashboard-grid" style={{ marginBottom: '24px', gridTemplateColumns: 'repeat(4, 1fr)' }}>
         <div className="stat-card">
           <div className="stat-label">대기중</div>
-          <div className="stat-value" style={{ color: 'var(--color-warning)' }}>{pendingCount}</div>
+          <div className="stat-value" style={{ color: pendingCount > 0 ? 'var(--color-warning)' : undefined }}>{pendingCount}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">승인됨</div>
@@ -163,14 +269,14 @@ export default function ApprovalsPage() {
           <div className="stat-value" style={{ color: 'var(--color-danger)' }}>{rejectedCount}</div>
         </div>
         <div className="stat-card">
-          <div className="stat-label">만료됨</div>
-          <div className="stat-value">{expiredCount}</div>
+          <div className="stat-label">에스컬레이션</div>
+          <div className="stat-value" style={{ color: escalatedCount > 0 ? 'var(--color-danger)' : undefined }}>{escalatedCount}</div>
         </div>
       </div>
 
       {/* Filters */}
       <div className="card" style={{ marginBottom: '24px', padding: '16px' }}>
-        <div style={{ display: 'flex', gap: '16px' }}>
+        <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
           <select
             className="form-input form-select"
             style={{ width: '200px' }}
@@ -186,6 +292,17 @@ export default function ApprovalsPage() {
           <button className="btn btn-ghost" onClick={() => fetchRequests()}>
             🔄 새로고침
           </button>
+          <div style={{ flex: 1 }} />
+          {pendingIds.length > 0 && (
+            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+              <input 
+                type="checkbox" 
+                checked={selectedIds.size === pendingIds.length && pendingIds.length > 0}
+                onChange={toggleSelectAll}
+              />
+              전체 선택 ({pendingIds.length})
+            </label>
+          )}
         </div>
       </div>
 
@@ -204,6 +321,7 @@ export default function ApprovalsPage() {
             <table className="table">
               <thead>
                 <tr>
+                  <th style={{ width: '40px' }}></th>
                   <th>요청자</th>
                   <th>대상 서버</th>
                   <th>목적</th>
@@ -216,8 +334,24 @@ export default function ApprovalsPage() {
               <tbody>
                 {requests.map(request => {
                   const statusBadge = getStatusBadge(request.status);
+                  const escalated = isEscalated(request);
                   return (
-                    <tr key={request.id}>
+                    <tr 
+                      key={request.id} 
+                      style={{ 
+                        background: escalated ? 'rgba(234, 179, 8, 0.05)' : undefined,
+                        borderLeft: escalated ? '3px solid var(--color-warning)' : undefined,
+                      }}
+                    >
+                      <td>
+                        {request.status === 'PENDING' && (
+                          <input 
+                            type="checkbox" 
+                            checked={selectedIds.has(request.id)}
+                            onChange={() => toggleSelection(request.id)}
+                          />
+                        )}
+                      </td>
                       <td>
                         <div style={{ fontWeight: 500 }}>{request.requester.name}</div>
                         <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
@@ -229,10 +363,7 @@ export default function ApprovalsPage() {
                       </td>
                       <td>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <span className={`badge ${
-                            request.server.environment === 'PROD' ? 'badge-danger' : 
-                            request.server.environment === 'STAGE' ? 'badge-warning' : 'badge-success'
-                          }`} style={{ fontSize: '0.65rem' }}>
+                          <span className={`badge ${getEnvBadge(request.server.environment)}`} style={{ fontSize: '0.65rem' }}>
                             {request.server.environment}
                           </span>
                           <span>{request.server.name}</span>
@@ -249,7 +380,10 @@ export default function ApprovalsPage() {
                         </span>
                       </td>
                       <td>
-                        <span className={`badge ${statusBadge.class}`}>{statusBadge.label}</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span className={`badge ${statusBadge.class}`}>{statusBadge.label}</span>
+                          {escalated && <span title="30분 이상 대기 중">⏰</span>}
+                        </div>
                       </td>
                       <td style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>
                         {new Date(request.requestedAt).toLocaleString()}
@@ -311,30 +445,40 @@ export default function ApprovalsPage() {
       {/* Detail/Reject Modal */}
       {selectedRequest && (
         <div className="modal-overlay active" onClick={() => setSelectedRequest(null)}>
-          <div className="modal" style={{ maxWidth: '500px' }} onClick={(e) => e.stopPropagation()}>
+          <div className="modal" style={{ maxWidth: '550px' }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h3 className="modal-title">승인 요청 상세</h3>
               <button className="modal-close" onClick={() => setSelectedRequest(null)}>×</button>
             </div>
             <div className="modal-body">
               <div style={{ display: 'grid', gap: '16px' }}>
-                <div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>요청자</div>
-                  <div style={{ fontWeight: 500 }}>{selectedRequest.requester.name}</div>
-                  <div style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>{selectedRequest.requester.email}</div>
-                </div>
-                <div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>대상 서버</div>
-                  <div style={{ fontWeight: 500 }}>{selectedRequest.server.name}</div>
-                  <div style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>{selectedRequest.server.environment}</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                  <div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>요청자</div>
+                    <div style={{ fontWeight: 500 }}>{selectedRequest.requester.name}</div>
+                    <div style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>{selectedRequest.requester.email}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>대상 서버</div>
+                    <div style={{ fontWeight: 500 }}>{selectedRequest.server.name}</div>
+                    <div style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>{selectedRequest.server.environment}</div>
+                  </div>
                 </div>
                 <div>
                   <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>접근 목적</div>
-                  <div style={{ fontWeight: 500 }}>{selectedRequest.purpose}</div>
+                  <div style={{ fontWeight: 500, padding: '8px', background: 'var(--color-surface)', borderRadius: 'var(--radius-md)', marginTop: '4px' }}>
+                    {selectedRequest.purpose}
+                  </div>
                 </div>
-                <div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>만료 시간</div>
-                  <div style={{ fontWeight: 500 }}>{new Date(selectedRequest.expiresAt).toLocaleString()}</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                  <div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>요청 시간</div>
+                    <div style={{ fontWeight: 500 }}>{new Date(selectedRequest.requestedAt).toLocaleString()}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>만료 시간</div>
+                    <div style={{ fontWeight: 500 }}>{new Date(selectedRequest.expiresAt).toLocaleString()}</div>
+                  </div>
                 </div>
                 {selectedRequest.approver && (
                   <div>
@@ -345,11 +489,13 @@ export default function ApprovalsPage() {
                 {selectedRequest.notes && (
                   <div>
                     <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>사유</div>
-                    <div style={{ fontWeight: 500 }}>{selectedRequest.notes}</div>
+                    <div style={{ fontWeight: 500, padding: '8px', background: 'var(--color-surface)', borderRadius: 'var(--radius-md)', marginTop: '4px' }}>
+                      {selectedRequest.notes}
+                    </div>
                   </div>
                 )}
                 {selectedRequest.status === 'PENDING' && (
-                  <div className="form-group">
+                  <div className="form-group" style={{ marginTop: '8px' }}>
                     <label className="form-label">거절 사유</label>
                     <textarea 
                       className="form-input" 
@@ -370,6 +516,62 @@ export default function ApprovalsPage() {
                   <button className="btn btn-danger" onClick={() => handleReject(selectedRequest.id)}>거절</button>
                 </>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Batch Action Modal */}
+      {showBatchModal && (
+        <div className="modal-overlay active" onClick={() => setShowBatchModal(false)}>
+          <div className="modal" style={{ maxWidth: '450px' }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title">
+                {batchAction === 'approve' ? '일괄 승인' : '일괄 거절'}
+              </h3>
+              <button className="modal-close" onClick={() => setShowBatchModal(false)}>×</button>
+            </div>
+            <div className="modal-body">
+              <div className={`alert ${batchAction === 'approve' ? 'alert-success' : 'alert-danger'}`} style={{ marginBottom: '16px' }}>
+                <strong>{selectedIds.size}건</strong>의 요청을 {batchAction === 'approve' ? '승인' : '거절'}합니다.
+              </div>
+              
+              {batchAction === 'reject' && (
+                <div className="form-group">
+                  <label className="form-label">거절 사유</label>
+                  <textarea 
+                    className="form-input" 
+                    rows={3}
+                    value={batchNotes}
+                    onChange={(e) => setBatchNotes(e.target.value)}
+                    placeholder="일괄 거절 사유를 입력하세요..."
+                  />
+                </div>
+              )}
+
+              <div style={{ marginTop: '12px', fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>
+                선택된 요청 목록:
+                <div style={{ marginTop: '8px', maxHeight: '100px', overflow: 'auto', padding: '8px', background: 'var(--color-surface)', borderRadius: 'var(--radius-md)' }}>
+                  {Array.from(selectedIds).map(id => {
+                    const req = requests.find(r => r.id === id);
+                    return req ? (
+                      <div key={id} style={{ marginBottom: '4px' }}>
+                        • {req.requester.name} → {req.server.name}
+                      </div>
+                    ) : null;
+                  })}
+                </div>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setShowBatchModal(false)}>취소</button>
+              <button 
+                className={`btn ${batchAction === 'approve' ? 'btn-success' : 'btn-danger'}`}
+                onClick={handleBatchAction}
+                disabled={batchLoading}
+              >
+                {batchLoading ? '처리 중...' : `${selectedIds.size}건 ${batchAction === 'approve' ? '승인' : '거절'}`}
+              </button>
             </div>
           </div>
         </div>

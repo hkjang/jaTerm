@@ -48,35 +48,43 @@ export async function GET(request: NextRequest) {
     // Fetch related data
     const accessesWithInfo = await Promise.all(
       accesses.map(async (access) => {
-        const [requester, server, revokedBy] = await Promise.all([
+        const [requester, server, revokedBy, grantedBy] = await Promise.all([
           prisma.user.findUnique({
             where: { id: access.requesterId },
-            select: { name: true, email: true, role: true },
+            select: { id: true, name: true, email: true, role: true },
           }),
           prisma.server.findUnique({
             where: { id: access.serverId },
-            select: { name: true, environment: true },
+            select: { id: true, name: true, hostname: true, environment: true },
           }),
           access.revokedById ? prisma.user.findUnique({
             where: { id: access.revokedById },
             select: { name: true },
+          }) : null,
+          access.grantedById ? prisma.user.findUnique({
+            where: { id: access.grantedById },
+            select: { name: true, email: true },
           }) : null,
         ]);
 
         return {
           id: access.id,
           requester: {
+            id: requester?.id || '',
             name: requester?.name || 'Unknown',
             email: requester?.email || '',
             role: requester?.role || '',
           },
           server: {
+            id: server?.id || '',
             name: server?.name || 'Unknown',
+            hostname: server?.hostname || '',
             environment: server?.environment || 'DEV',
           },
           reason: access.reason,
           status: access.status,
           grantedAt: access.grantedAt,
+          grantedBy: grantedBy ? { name: grantedBy.name, email: grantedBy.email } : null,
           expiresAt: access.expiresAt,
           revokedAt: access.revokedAt,
           revokedBy: revokedBy?.name || null,
