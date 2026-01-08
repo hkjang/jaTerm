@@ -1,180 +1,220 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import AdminLayout from '@/components/admin/AdminLayout';
 
 interface Admin {
   id: string;
   name: string;
   email: string;
-  role: 'SUPER_ADMIN' | 'ADMIN' | 'AUDITOR';
+  role: string;
   mfaEnabled: boolean;
-  ipRestriction: string[];
   isActive: boolean;
-  lastLoginAt: Date | null;
-  lastLoginIp: string | null;
-  permissions: string[];
+  lastLoginAt: string | null;
 }
 
-const mockAdmins: Admin[] = [
-  { 
-    id: '1', 
-    name: '최고관리자', 
-    email: 'super@jaterm.com', 
-    role: 'SUPER_ADMIN',
-    mfaEnabled: true,
-    ipRestriction: ['192.168.1.0/24'],
-    isActive: true,
-    lastLoginAt: new Date(),
-    lastLoginIp: '192.168.1.100',
-    permissions: ['*']
-  },
-  { 
-    id: '2', 
-    name: '홍길동', 
-    email: 'admin@jaterm.com', 
-    role: 'ADMIN',
-    mfaEnabled: true,
-    ipRestriction: ['192.168.1.0/24', '10.0.0.0/8'],
-    isActive: true,
-    lastLoginAt: new Date(Date.now() - 86400000),
-    lastLoginIp: '192.168.1.101',
-    permissions: ['users', 'servers', 'policies', 'sessions']
-  },
-  { 
-    id: '3', 
-    name: '감사관', 
-    email: 'auditor@jaterm.com', 
-    role: 'AUDITOR',
-    mfaEnabled: true,
-    ipRestriction: [],
-    isActive: true,
-    lastLoginAt: new Date(Date.now() - 172800000),
-    lastLoginIp: '192.168.1.102',
-    permissions: ['audit.read', 'sessions.read', 'logs.read']
-  },
-];
+interface Pagination {
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+}
 
 export default function AdminsPage() {
-  const [admins, setAdmins] = useState(mockAdmins);
+  const [admins, setAdmins] = useState<Admin[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [pagination, setPagination] = useState<Pagination | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [selectedAdmin, setSelectedAdmin] = useState<Admin | null>(null);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+
+  const getAuthHeaders = (): Record<string, string> => {
+    if (typeof window === 'undefined') return {};
+    const user = localStorage.getItem('user');
+    if (!user) return {};
+    try {
+      const { id } = JSON.parse(user);
+      return { 'Authorization': `Bearer ${id}` };
+    } catch {
+      return {};
+    }
+  };
+
+  const fetchAdmins = useCallback(async (page = 1) => {
+    setLoading(true);
+    try {
+      // Fetch only admin roles (SUPER, ADMIN)
+      const params = new URLSearchParams({
+        page: page.toString(),
+        limit: '20',
+      });
+
+      const response = await fetch(`/api/admin/users?${params}`, {
+        headers: getAuthHeaders(),
+      });
+
+      if (!response.ok) throw new Error('Failed to fetch admins');
+      
+      const data = await response.json();
+      // Filter for admin roles only
+      const adminUsers = data.users.filter((u: Admin) => 
+        ['SUPER', 'ADMIN'].includes(u.role)
+      );
+      setAdmins(adminUsers);
+      setPagination(data.pagination);
+      setError('');
+    } catch (err) {
+      setError('관리자 목록을 불러오는데 실패했습니다.');
+      console.error('Fetch admins error:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchAdmins();
+  }, [fetchAdmins]);
 
   const getRoleBadge = (role: string) => {
     switch (role) {
-      case 'SUPER_ADMIN': return { class: 'badge-danger', label: 'Super Admin' };
+      case 'SUPER': return { class: 'badge-danger', label: 'Super Admin' };
       case 'ADMIN': return { class: 'badge-warning', label: 'Admin' };
-      case 'AUDITOR': return { class: 'badge-info', label: 'Auditor' };
       default: return { class: 'badge-info', label: role };
     }
   };
 
+  const handleToggleActive = async (admin: Admin) => {
+    try {
+      await fetch('/api/admin/users', {
+        method: 'PUT',
+        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: admin.id, isActive: !admin.isActive }),
+      });
+      setSuccess(admin.isActive ? '관리자가 비활성화되었습니다.' : '관리자가 활성화되었습니다.');
+      fetchAdmins();
+    } catch (err) {
+      setError('상태 변경에 실패했습니다.');
+    }
+  };
+
+  const superCount = admins.filter(a => a.role === 'SUPER').length;
+  const adminCount = admins.filter(a => a.role === 'ADMIN').length;
+
   return (
     <AdminLayout 
       title="관리자 계정" 
-      description="Super Admin, Admin, Auditor 역할 관리"
+      description="Super Admin, Admin 역할 관리"
       actions={
         <button className="btn btn-primary" onClick={() => setShowModal(true)}>
           + 관리자 추가
         </button>
       }
     >
+      {/* Messages */}
+      {success && (
+        <div className="alert alert-success" style={{ marginBottom: '16px' }}>
+          {success}
+          <button onClick={() => setSuccess('')} style={{ float: 'right', background: 'none', border: 'none', cursor: 'pointer' }}>×</button>
+        </div>
+      )}
+      {error && (
+        <div className="alert alert-danger" style={{ marginBottom: '16px' }}>
+          {error}
+          <button onClick={() => setError('')} style={{ float: 'right', background: 'none', border: 'none', cursor: 'pointer' }}>×</button>
+        </div>
+      )}
+
       {/* Role Stats */}
       <div className="dashboard-grid" style={{ marginBottom: '24px', gridTemplateColumns: 'repeat(3, 1fr)' }}>
-        {['SUPER_ADMIN', 'ADMIN', 'AUDITOR'].map(role => {
-          const count = admins.filter(a => a.role === role).length;
-          const badge = getRoleBadge(role);
-          return (
-            <div key={role} className="stat-card">
-              <div className="stat-label">{badge.label}</div>
-              <div className="stat-value">{count}</div>
-            </div>
-          );
-        })}
+        <div className="stat-card">
+          <div className="stat-label">Super Admin</div>
+          <div className="stat-value">{superCount}</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-label">Admin</div>
+          <div className="stat-value">{adminCount}</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-label">총 관리자</div>
+          <div className="stat-value">{admins.length}</div>
+        </div>
       </div>
 
       {/* Admins Table */}
-      <div className="card" style={{ padding: 0 }}>
-        <div className="table-container">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>관리자</th>
-                <th>역할</th>
-                <th>MFA</th>
-                <th>IP 제한</th>
-                <th>권한</th>
-                <th>최근 로그인</th>
-                <th>상태</th>
-                <th>작업</th>
-              </tr>
-            </thead>
-            <tbody>
-              {admins.map(admin => {
-                const badge = getRoleBadge(admin.role);
-                return (
-                  <tr key={admin.id}>
-                    <td>
-                      <div style={{ fontWeight: 500 }}>{admin.name}</div>
-                      <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>{admin.email}</div>
-                    </td>
-                    <td>
-                      <span className={`badge ${badge.class}`}>{badge.label}</span>
-                    </td>
-                    <td>
-                      {admin.mfaEnabled ? (
-                        <span style={{ color: 'var(--color-success)' }}>✓ 필수</span>
-                      ) : (
-                        <span style={{ color: 'var(--color-danger)' }}>✗ 미설정</span>
-                      )}
-                    </td>
-                    <td>
-                      {admin.ipRestriction.length > 0 ? (
-                        <div style={{ fontSize: '0.8rem', fontFamily: 'var(--font-mono)' }}>
-                          {admin.ipRestriction[0]}
-                          {admin.ipRestriction.length > 1 && (
-                            <span style={{ color: 'var(--color-text-muted)' }}> +{admin.ipRestriction.length - 1}</span>
-                          )}
-                        </div>
-                      ) : (
-                        <span style={{ color: 'var(--color-text-muted)' }}>제한 없음</span>
-                      )}
-                    </td>
-                    <td>
-                      {admin.permissions[0] === '*' ? (
-                        <span className="badge badge-danger">전체 권한</span>
-                      ) : (
-                        <span style={{ fontSize: '0.8rem' }}>{admin.permissions.length}개 권한</span>
-                      )}
-                    </td>
-                    <td style={{ fontSize: '0.85rem' }}>
-                      {admin.lastLoginAt ? (
-                        <div>
-                          <div>{new Date(admin.lastLoginAt).toLocaleDateString()}</div>
-                          <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', fontFamily: 'var(--font-mono)' }}>
-                            {admin.lastLoginIp}
-                          </div>
-                        </div>
-                      ) : '-'}
-                    </td>
-                    <td>
-                      <span className={`badge ${admin.isActive ? 'badge-success' : 'badge-danger'}`}>
-                        {admin.isActive ? '활성' : '비활성'}
-                      </span>
-                    </td>
-                    <td>
-                      <div style={{ display: 'flex', gap: '8px' }}>
-                        <button className="btn btn-ghost btn-sm" onClick={() => setSelectedAdmin(admin)}>권한 설정</button>
-                        <button className="btn btn-ghost btn-sm" style={{ color: 'var(--color-danger)' }}>비활성화</button>
-                      </div>
+      {loading ? (
+        <div style={{ display: 'flex', justifyContent: 'center', padding: '40px' }}>
+          <span className="spinner" style={{ width: '32px', height: '32px' }} />
+        </div>
+      ) : (
+        <div className="card" style={{ padding: 0 }}>
+          <div className="table-container">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>관리자</th>
+                  <th>역할</th>
+                  <th>MFA</th>
+                  <th>최근 로그인</th>
+                  <th>상태</th>
+                  <th>작업</th>
+                </tr>
+              </thead>
+              <tbody>
+                {admins.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} style={{ textAlign: 'center', padding: '40px', color: 'var(--color-text-muted)' }}>
+                      관리자가 없습니다.
                     </td>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                ) : (
+                  admins.map(admin => {
+                    const badge = getRoleBadge(admin.role);
+                    return (
+                      <tr key={admin.id}>
+                        <td>
+                          <div style={{ fontWeight: 500 }}>{admin.name || 'Unknown'}</div>
+                          <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>{admin.email}</div>
+                        </td>
+                        <td>
+                          <span className={`badge ${badge.class}`}>{badge.label}</span>
+                        </td>
+                        <td>
+                          {admin.mfaEnabled ? (
+                            <span style={{ color: 'var(--color-success)' }}>✓ 활성</span>
+                          ) : (
+                            <span style={{ color: 'var(--color-warning)' }}>미설정</span>
+                          )}
+                        </td>
+                        <td style={{ fontSize: '0.85rem' }}>
+                          {admin.lastLoginAt ? new Date(admin.lastLoginAt).toLocaleDateString() : '-'}
+                        </td>
+                        <td>
+                          <span className={`badge ${admin.isActive ? 'badge-success' : 'badge-danger'}`}>
+                            {admin.isActive ? '활성' : '비활성'}
+                          </span>
+                        </td>
+                        <td>
+                          <div style={{ display: 'flex', gap: '8px' }}>
+                            <button className="btn btn-ghost btn-sm" onClick={() => setSelectedAdmin(admin)}>권한 설정</button>
+                            <button 
+                              className="btn btn-ghost btn-sm" 
+                              style={{ color: admin.isActive ? 'var(--color-danger)' : 'var(--color-success)' }}
+                              onClick={() => handleToggleActive(admin)}
+                            >
+                              {admin.isActive ? '비활성화' : '활성화'}
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Add Admin Modal */}
       {showModal && (
@@ -185,38 +225,12 @@ export default function AdminsPage() {
               <button className="modal-close" onClick={() => setShowModal(false)}>×</button>
             </div>
             <div className="modal-body">
-              <div className="form-group">
-                <label className="form-label">이름</label>
-                <input type="text" className="form-input" placeholder="관리자 이름" />
-              </div>
-              <div className="form-group">
-                <label className="form-label">이메일</label>
-                <input type="email" className="form-input" placeholder="admin@company.com" />
-              </div>
-              <div className="form-group">
-                <label className="form-label">역할</label>
-                <select className="form-input form-select">
-                  <option value="ADMIN">Admin</option>
-                  <option value="AUDITOR">Auditor</option>
-                </select>
-              </div>
-              <div className="form-group">
-                <label className="form-label">IP 제한 (CIDR)</label>
-                <input type="text" className="form-input" placeholder="192.168.1.0/24" />
-                <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', marginTop: '4px' }}>
-                  여러 IP는 쉼표로 구분
-                </div>
-              </div>
-              <div className="form-group">
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <input type="checkbox" defaultChecked />
-                  MFA 필수
-                </label>
+              <div className="alert alert-info">
+                관리자를 추가하려면 먼저 사용자 관리에서 계정을 생성한 후, 해당 계정의 역할을 ADMIN으로 변경하세요.
               </div>
             </div>
             <div className="modal-footer">
-              <button className="btn btn-secondary" onClick={() => setShowModal(false)}>취소</button>
-              <button className="btn btn-primary">추가</button>
+              <button className="btn btn-secondary" onClick={() => setShowModal(false)}>닫기</button>
             </div>
           </div>
         </div>
@@ -251,19 +265,12 @@ export default function AdminsPage() {
                     <label key={perm.key} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <input 
                         type="checkbox" 
-                        defaultChecked={selectedAdmin.permissions.includes('*') || selectedAdmin.permissions.includes(perm.key)}
-                        disabled={selectedAdmin.role === 'SUPER_ADMIN'}
+                        defaultChecked={selectedAdmin.role === 'SUPER'}
+                        disabled={selectedAdmin.role === 'SUPER'}
                       />
                       {perm.label}
                     </label>
                   ))}
-                </div>
-              </div>
-
-              <div style={{ marginBottom: '16px' }}>
-                <div style={{ fontWeight: 500, marginBottom: '8px' }}>API 단위 권한</div>
-                <div style={{ background: 'var(--color-surface)', padding: '12px', borderRadius: 'var(--radius-md)', fontSize: '0.85rem' }}>
-                  <code>/api/admin/*</code> - 관리자 API 접근
                 </div>
               </div>
             </div>

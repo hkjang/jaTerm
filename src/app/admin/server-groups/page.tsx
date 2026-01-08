@@ -1,31 +1,89 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import AdminLayout from '@/components/admin/AdminLayout';
 
-interface ServerGroup {
+interface Server {
   id: string;
   name: string;
-  description: string;
+  hostname: string;
   environment: string;
-  serverCount: number;
-  servers: { id: string; name: string; hostname: string }[];
+  isActive: boolean;
 }
 
-const mockServerGroups: ServerGroup[] = [
-  { id: '1', name: 'Production Web', description: '프로덕션 웹 서버', environment: 'PROD', serverCount: 3,
-    servers: [{ id: '1', name: 'prod-web-01', hostname: '192.168.1.10' }, { id: '2', name: 'prod-web-02', hostname: '192.168.1.11' }]},
-  { id: '2', name: 'Production API', description: '프로덕션 API 서버', environment: 'PROD', serverCount: 2,
-    servers: [{ id: '3', name: 'prod-api-01', hostname: '192.168.1.20' }]},
-  { id: '3', name: 'Staging All', description: '스테이징 환경', environment: 'STAGE', serverCount: 4,
-    servers: [{ id: '4', name: 'stage-web-01', hostname: '192.168.2.10' }]},
-  { id: '4', name: 'Development', description: '개발 환경 서버', environment: 'DEV', serverCount: 2,
-    servers: [{ id: '5', name: 'dev-server-01', hostname: '192.168.3.10' }]},
-];
+interface ServerGroup {
+  environment: string;
+  servers: Server[];
+}
 
 export default function ServerGroupsPage() {
-  const [groups] = useState(mockServerGroups);
-  const [showModal, setShowModal] = useState(false);
+  const [groups, setGroups] = useState<ServerGroup[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  const getAuthHeaders = (): Record<string, string> => {
+    if (typeof window === 'undefined') return {};
+    const user = localStorage.getItem('user');
+    if (!user) return {};
+    try {
+      const { id } = JSON.parse(user);
+      return { 'Authorization': `Bearer ${id}` };
+    } catch {
+      return {};
+    }
+  };
+
+  const fetchServers = useCallback(async () => {
+    setLoading(true);
+    try {
+      const response = await fetch('/api/admin/servers', {
+        headers: getAuthHeaders(),
+      });
+
+      if (!response.ok) throw new Error('Failed to fetch servers');
+      
+      const data = await response.json();
+      const servers: Server[] = data.servers || [];
+      
+      // Group servers by environment
+      const groupMap = new Map<string, Server[]>();
+      servers.forEach(server => {
+        const env = server.environment || 'OTHER';
+        if (!groupMap.has(env)) {
+          groupMap.set(env, []);
+        }
+        groupMap.get(env)!.push(server);
+      });
+      
+      const groupedServers: ServerGroup[] = Array.from(groupMap.entries()).map(([environment, servers]) => ({
+        environment,
+        servers,
+      }));
+      
+      // Sort: PROD, STAGE, DEV, others
+      const order = ['PROD', 'STAGE', 'DEV'];
+      groupedServers.sort((a, b) => {
+        const aIdx = order.indexOf(a.environment);
+        const bIdx = order.indexOf(b.environment);
+        if (aIdx === -1 && bIdx === -1) return 0;
+        if (aIdx === -1) return 1;
+        if (bIdx === -1) return -1;
+        return aIdx - bIdx;
+      });
+      
+      setGroups(groupedServers);
+      setError('');
+    } catch (err) {
+      setError('서버 목록을 불러오는데 실패했습니다.');
+      console.error('Fetch servers error:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchServers();
+  }, [fetchServers]);
 
   const getEnvColor = (env: string) => {
     switch (env) {
@@ -36,56 +94,113 @@ export default function ServerGroupsPage() {
     }
   };
 
+  const getEnvBadgeClass = (env: string) => {
+    switch (env) {
+      case 'PROD': return 'badge-danger';
+      case 'STAGE': return 'badge-warning';
+      case 'DEV': return 'badge-success';
+      default: return 'badge-info';
+    }
+  };
+
+  const prodCount = groups.find(g => g.environment === 'PROD')?.servers.length || 0;
+  const stageCount = groups.find(g => g.environment === 'STAGE')?.servers.length || 0;
+  const devCount = groups.find(g => g.environment === 'DEV')?.servers.length || 0;
+
   return (
-    <AdminLayout title="서버 그룹" description="서버를 논리적으로 그룹화하여 관리"
-      actions={<button className="btn btn-primary" onClick={() => setShowModal(true)}>+ 그룹 추가</button>}>
+    <AdminLayout 
+      title="서버 그룹" 
+      description="환경별 서버 그룹 관리"
+      actions={
+        <button className="btn btn-ghost" onClick={() => fetchServers()}>🔄 새로고침</button>
+      }
+    >
+      {error && (
+        <div className="alert alert-danger" style={{ marginBottom: '16px' }}>
+          {error}
+          <button onClick={() => setError('')} style={{ float: 'right', background: 'none', border: 'none', cursor: 'pointer' }}>×</button>
+        </div>
+      )}
       
       <div className="dashboard-grid" style={{ marginBottom: '24px', gridTemplateColumns: 'repeat(3, 1fr)' }}>
-        <div className="stat-card"><div className="stat-label">PROD 그룹</div><div className="stat-value">{groups.filter(g => g.environment === 'PROD').length}</div></div>
-        <div className="stat-card"><div className="stat-label">STAGE 그룹</div><div className="stat-value">{groups.filter(g => g.environment === 'STAGE').length}</div></div>
-        <div className="stat-card"><div className="stat-label">DEV 그룹</div><div className="stat-value">{groups.filter(g => g.environment === 'DEV').length}</div></div>
+        <div className="stat-card">
+          <div className="stat-label">PROD</div>
+          <div className="stat-value" style={{ color: 'var(--color-danger)' }}>{prodCount}</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-label">STAGE</div>
+          <div className="stat-value" style={{ color: 'var(--color-warning)' }}>{stageCount}</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-label">DEV</div>
+          <div className="stat-value" style={{ color: 'var(--color-success)' }}>{devCount}</div>
+        </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '16px' }}>
-        {groups.map(group => (
-          <div key={group.id} className="card" style={{ padding: '20px', borderTop: `3px solid ${getEnvColor(group.environment)}` }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}>
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                  <h3 style={{ fontWeight: 600 }}>{group.name}</h3>
-                  <span className={`badge badge-${group.environment === 'PROD' ? 'danger' : group.environment === 'STAGE' ? 'warning' : 'success'}`}>{group.environment}</span>
+      {loading ? (
+        <div style={{ display: 'flex', justifyContent: 'center', padding: '40px' }}>
+          <span className="spinner" style={{ width: '32px', height: '32px' }} />
+        </div>
+      ) : groups.length === 0 ? (
+        <div className="card" style={{ padding: '40px', textAlign: 'center', color: 'var(--color-text-muted)' }}>
+          서버가 없습니다. 먼저 서버를 추가해주세요.
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '16px' }}>
+          {groups.map(group => (
+            <div 
+              key={group.environment} 
+              className="card" 
+              style={{ padding: '20px', borderTop: `3px solid ${getEnvColor(group.environment)}` }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '16px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <h3 style={{ fontWeight: 600 }}>{group.environment} 환경</h3>
+                  <span className={`badge ${getEnvBadgeClass(group.environment)}`}>
+                    {group.environment}
+                  </span>
                 </div>
-                <p style={{ fontSize: '0.9rem', color: 'var(--color-text-secondary)' }}>{group.description}</p>
+                <div style={{ fontSize: '1.5rem', fontWeight: 700, color: getEnvColor(group.environment) }}>
+                  {group.servers.length}
+                </div>
               </div>
-              <div style={{ fontSize: '1.5rem', fontWeight: 700, color: getEnvColor(group.environment) }}>{group.serverCount}</div>
+              <div style={{ background: 'var(--color-surface)', borderRadius: 'var(--radius-md)', padding: '12px' }}>
+                {group.servers.map(server => (
+                  <div 
+                    key={server.id} 
+                    style={{ 
+                      display: 'flex', 
+                      justifyContent: 'space-between', 
+                      alignItems: 'center',
+                      fontSize: '0.85rem', 
+                      padding: '6px 0',
+                      borderBottom: '1px solid var(--color-border)',
+                    }}
+                  >
+                    <span style={{ fontWeight: 500 }}>{server.name}</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-muted)', fontSize: '0.8rem' }}>
+                        {server.hostname}
+                      </span>
+                      <span 
+                        style={{ 
+                          width: '8px', 
+                          height: '8px', 
+                          borderRadius: '50%', 
+                          background: server.isActive ? 'var(--color-success)' : 'var(--color-danger)' 
+                        }} 
+                      />
+                    </div>
+                  </div>
+                ))}
+                {group.servers.length === 0 && (
+                  <div style={{ color: 'var(--color-text-muted)', textAlign: 'center', padding: '12px' }}>
+                    서버 없음
+                  </div>
+                )}
+              </div>
             </div>
-            <div style={{ background: 'var(--color-surface)', borderRadius: 'var(--radius-md)', padding: '12px' }}>
-              {group.servers.slice(0, 2).map(server => (
-                <div key={server.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '4px' }}>
-                  <span>{server.name}</span>
-                  <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-muted)' }}>{server.hostname}</span>
-                </div>
-              ))}
-            </div>
-            <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
-              <button className="btn btn-ghost btn-sm">수정</button>
-              <button className="btn btn-ghost btn-sm" style={{ color: 'var(--color-danger)' }}>삭제</button>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {showModal && (
-        <div className="modal-overlay active" onClick={() => setShowModal(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header"><h3 className="modal-title">서버 그룹 추가</h3><button className="modal-close" onClick={() => setShowModal(false)}>×</button></div>
-            <div className="modal-body">
-              <div className="form-group"><label className="form-label">그룹 이름</label><input type="text" className="form-input" placeholder="Production Web" /></div>
-              <div className="form-group"><label className="form-label">설명</label><input type="text" className="form-input" placeholder="프로덕션 웹 서버 그룹" /></div>
-              <div className="form-group"><label className="form-label">환경</label><select className="form-input form-select"><option value="DEV">Development</option><option value="STAGE">Staging</option><option value="PROD">Production</option></select></div>
-            </div>
-            <div className="modal-footer"><button className="btn btn-secondary" onClick={() => setShowModal(false)}>취소</button><button className="btn btn-primary">추가</button></div>
-          </div>
+          ))}
         </div>
       )}
     </AdminLayout>

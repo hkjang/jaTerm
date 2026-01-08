@@ -416,6 +416,108 @@ async function main() {
 
   console.log('✅ System settings created');
 
+  // Create sample macros
+  const sampleMacros = [
+    {
+      id: 'macro-1',
+      userId: admin.id,
+      name: '서버 상태 점검',
+      description: '서버 헬스체크 자동화',
+      steps: JSON.stringify(['uptime', 'df -h', 'free -m', 'top -bn1 | head -20']),
+      variables: JSON.stringify([]),
+      isShared: true,
+    },
+    {
+      id: 'macro-2',
+      userId: operator.id,
+      name: '로그 로테이션',
+      description: '로그 파일 정리 자동화',
+      steps: JSON.stringify(['cd /var/log', 'find . -name "*.log" -mtime +30 -delete', 'du -sh .']),
+      variables: JSON.stringify([{ name: 'DAYS', defaultValue: '30' }]),
+      isShared: true,
+    },
+  ];
+
+  for (const mac of sampleMacros) {
+    await prisma.macro.upsert({
+      where: { id: mac.id },
+      update: {},
+      create: mac,
+    });
+  }
+
+  console.log('✅ Macros created');
+
+  // Create sample command policies
+  const commandPolicies = [
+    {
+      id: 'cmdpol-1',
+      name: '위험 명령 차단',
+      description: '시스템 손상 가능 명령어 차단',
+      type: 'BLACKLIST',
+      patterns: JSON.stringify(['rm -rf /', 'rm -rf /*', 'mkfs', 'dd if=/dev/zero']),
+      isRegex: false,
+      environment: JSON.stringify(['PROD', 'STAGE']),
+      roles: JSON.stringify(['DEVELOPER', 'OPERATOR']),
+      isActive: true,
+    },
+    {
+      id: 'cmdpol-2',
+      name: 'Production 조회 전용',
+      description: '프로덕션에서 읽기 명령만 허용',
+      type: 'WHITELIST',
+      patterns: JSON.stringify(['ls', 'cat', 'tail', 'head', 'grep', 'ps', 'top', 'df', 'du']),
+      isRegex: false,
+      environment: JSON.stringify(['PROD']),
+      roles: JSON.stringify(['OPERATOR']),
+      isActive: true,
+    },
+  ];
+
+  for (const pol of commandPolicies) {
+    await prisma.commandPolicy.upsert({
+      where: { id: pol.id },
+      update: {},
+      create: pol,
+    });
+  }
+
+  console.log('✅ Command policies created');
+
+  // Create sample scheduled tasks
+  const scheduledTasks = [
+    {
+      id: 'task-1',
+      userId: admin.id,
+      name: '일일 백업',
+      description: '매일 자정 시스템 백업',
+      command: '/usr/local/bin/backup.sh',
+      schedule: '0 0 * * *',
+      targetIds: JSON.stringify([createdServers[0].id]),
+      isActive: true,
+    },
+    {
+      id: 'task-2',
+      userId: operator.id,
+      name: '주간 로그 정리',
+      description: '주말마다 오래된 로그 삭제',
+      command: 'find /var/log -name "*.log" -mtime +7 -delete',
+      schedule: '0 3 * * 0',
+      targetIds: JSON.stringify([createdServers[0].id, createdServers[1].id]),
+      isActive: false,
+    },
+  ];
+
+  for (const task of scheduledTasks) {
+    await prisma.scheduledTask.upsert({
+      where: { id: task.id },
+      update: {},
+      create: task,
+    });
+  }
+
+  console.log('✅ Scheduled tasks created');
+
   console.log('🎉 Database seeding completed!');
 }
 

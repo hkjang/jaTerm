@@ -1,12 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import AdminLayout from '@/components/admin/AdminLayout';
 
 interface Macro {
   id: string;
   name: string;
-  description: string;
+  description: string | null;
   steps: string[];
   variables: { name: string; defaultValue: string }[];
   isShared: boolean;
@@ -14,69 +14,166 @@ interface Macro {
   usageCount: number;
 }
 
-const mockMacros: Macro[] = [
-  { id: '1', name: '서버 상태 점검', description: '서버 헬스체크 자동화', steps: ['uptime', 'df -h', 'free -m', 'top -bn1 | head -20'], variables: [], isShared: true, createdBy: '홍길동', usageCount: 156 },
-  { id: '2', name: '로그 로테이션', description: '로그 파일 정리 자동화', steps: ['cd /var/log', 'find . -name "*.log" -mtime +30 -delete', 'du -sh .'], variables: [{ name: 'DAYS', defaultValue: '30' }], isShared: true, createdBy: '김철수', usageCount: 42 },
-  { id: '3', name: '배포 시작', description: '애플리케이션 배포 스크립트', steps: ['git pull', 'npm install', 'npm run build', 'pm2 restart all'], variables: [{ name: 'BRANCH', defaultValue: 'main' }], isShared: false, createdBy: '이영희', usageCount: 28 },
-];
+interface Pagination {
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+}
 
 export default function MacrosPage() {
-  const [macros] = useState(mockMacros);
+  const [macros, setMacros] = useState<Macro[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [pagination, setPagination] = useState<Pagination | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [selectedMacro, setSelectedMacro] = useState<Macro | null>(null);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+
+  const getAuthHeaders = (): Record<string, string> => {
+    if (typeof window === 'undefined') return {};
+    const user = localStorage.getItem('user');
+    if (!user) return {};
+    try {
+      const { id } = JSON.parse(user);
+      return { 'Authorization': `Bearer ${id}` };
+    } catch {
+      return {};
+    }
+  };
+
+  const fetchMacros = useCallback(async (page = 1) => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({
+        page: page.toString(),
+        limit: '20',
+      });
+
+      const response = await fetch(`/api/admin/macros?${params}`, {
+        headers: getAuthHeaders(),
+      });
+
+      if (!response.ok) throw new Error('Failed to fetch macros');
+      
+      const data = await response.json();
+      setMacros(data.macros);
+      setPagination(data.pagination);
+      setError('');
+    } catch (err) {
+      setError('매크로 목록을 불러오는데 실패했습니다.');
+      console.error('Fetch macros error:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchMacros();
+  }, [fetchMacros]);
+
+  const handleDelete = async (id: string) => {
+    if (!confirm('정말 이 매크로를 삭제하시겠습니까?')) return;
+
+    try {
+      await fetch('/api/admin/macros', {
+        method: 'DELETE',
+        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      });
+      setSuccess('매크로가 삭제되었습니다.');
+      fetchMacros();
+    } catch (err) {
+      setError('매크로 삭제에 실패했습니다.');
+    }
+  };
+
+  const totalMacros = macros.length;
+  const sharedMacros = macros.filter(m => m.isShared).length;
+  const totalUsage = macros.reduce((a, m) => a + m.usageCount, 0);
+  const withVariables = macros.filter(m => m.variables.length > 0).length;
 
   return (
-    <AdminLayout title="매크로 템플릿" description="공용 매크로 및 자동화 스크립트 관리"
-      actions={<button className="btn btn-primary" onClick={() => setShowModal(true)}>+ 매크로 추가</button>}>
+    <AdminLayout 
+      title="매크로 템플릿" 
+      description="공용 매크로 및 자동화 스크립트 관리"
+      actions={<button className="btn btn-primary" onClick={() => setShowModal(true)}>+ 매크로 추가</button>}
+    >
+      {success && (
+        <div className="alert alert-success" style={{ marginBottom: '16px' }}>
+          {success}
+          <button onClick={() => setSuccess('')} style={{ float: 'right', background: 'none', border: 'none', cursor: 'pointer' }}>×</button>
+        </div>
+      )}
+      {error && (
+        <div className="alert alert-danger" style={{ marginBottom: '16px' }}>
+          {error}
+          <button onClick={() => setError('')} style={{ float: 'right', background: 'none', border: 'none', cursor: 'pointer' }}>×</button>
+        </div>
+      )}
       
       <div className="dashboard-grid" style={{ marginBottom: '24px', gridTemplateColumns: 'repeat(4, 1fr)' }}>
-        <div className="stat-card"><div className="stat-label">전체 매크로</div><div className="stat-value">{macros.length}</div></div>
-        <div className="stat-card"><div className="stat-label">공유 매크로</div><div className="stat-value">{macros.filter(m => m.isShared).length}</div></div>
-        <div className="stat-card"><div className="stat-label">총 실행</div><div className="stat-value">{macros.reduce((a, m) => a + m.usageCount, 0)}</div></div>
-        <div className="stat-card"><div className="stat-label">변수 포함</div><div className="stat-value">{macros.filter(m => m.variables.length > 0).length}</div></div>
+        <div className="stat-card"><div className="stat-label">전체 매크로</div><div className="stat-value">{totalMacros}</div></div>
+        <div className="stat-card"><div className="stat-label">공유 매크로</div><div className="stat-value">{sharedMacros}</div></div>
+        <div className="stat-card"><div className="stat-label">총 실행</div><div className="stat-value">{totalUsage}</div></div>
+        <div className="stat-card"><div className="stat-label">변수 포함</div><div className="stat-value">{withVariables}</div></div>
       </div>
 
-      <div style={{ display: 'grid', gap: '16px' }}>
-        {macros.map(macro => (
-          <div key={macro.id} className="card" style={{ padding: '20px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px' }}>
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                  <span style={{ fontSize: '1.1rem', fontWeight: 600 }}>{macro.name}</span>
-                  {macro.isShared && <span className="badge badge-success">공유</span>}
+      {loading ? (
+        <div style={{ display: 'flex', justifyContent: 'center', padding: '40px' }}>
+          <span className="spinner" style={{ width: '32px', height: '32px' }} />
+        </div>
+      ) : macros.length === 0 ? (
+        <div className="card" style={{ padding: '40px', textAlign: 'center', color: 'var(--color-text-muted)' }}>
+          매크로가 없습니다. 새 매크로를 추가해주세요.
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gap: '16px' }}>
+          {macros.map(macro => (
+            <div key={macro.id} className="card" style={{ padding: '20px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px' }}>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                    <span style={{ fontSize: '1.1rem', fontWeight: 600 }}>{macro.name}</span>
+                    {macro.isShared && <span className="badge badge-success">공유</span>}
+                  </div>
+                  <div style={{ color: 'var(--color-text-secondary)', fontSize: '0.9rem' }}>{macro.description || '설명 없음'}</div>
                 </div>
-                <div style={{ color: 'var(--color-text-secondary)', fontSize: '0.9rem' }}>{macro.description}</div>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--color-primary)' }}>{macro.usageCount}</div>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>실행 횟수</div>
+                </div>
               </div>
-              <div style={{ textAlign: 'right' }}>
-                <div style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--color-primary)' }}>{macro.usageCount}</div>
-                <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>실행 횟수</div>
-              </div>
-            </div>
-            <div style={{ background: 'var(--terminal-bg)', padding: '12px', borderRadius: 'var(--radius-md)', fontFamily: 'var(--font-mono)', fontSize: '0.85rem', marginBottom: '12px' }}>
-              {macro.steps.slice(0, 3).map((step, i) => (
-                <div key={i} style={{ color: 'var(--color-success)' }}>$ {step}</div>
-              ))}
-              {macro.steps.length > 3 && <div style={{ color: 'var(--color-text-muted)' }}>... +{macro.steps.length - 3} more</div>}
-            </div>
-            {macro.variables.length > 0 && (
-              <div style={{ fontSize: '0.85rem', marginBottom: '12px' }}>
-                <span style={{ color: 'var(--color-text-muted)' }}>변수: </span>
-                {macro.variables.map((v, i) => (
-                  <span key={i} className="badge badge-info" style={{ marginRight: '4px' }}>${'{' + v.name + '}'}</span>
+              <div style={{ background: 'var(--terminal-bg)', padding: '12px', borderRadius: 'var(--radius-md)', fontFamily: 'var(--font-mono)', fontSize: '0.85rem', marginBottom: '12px' }}>
+                {macro.steps.slice(0, 3).map((step, i) => (
+                  <div key={i} style={{ color: 'var(--color-success)' }}>$ {step}</div>
                 ))}
+                {macro.steps.length > 3 && <div style={{ color: 'var(--color-text-muted)' }}>... +{macro.steps.length - 3} more</div>}
               </div>
-            )}
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>작성자: {macro.createdBy}</span>
-              <div style={{ display: 'flex', gap: '8px' }}>
+              {macro.variables.length > 0 && (
+                <div style={{ fontSize: '0.85rem', marginBottom: '12px' }}>
+                  <span style={{ color: 'var(--color-text-muted)' }}>변수: </span>
+                  {macro.variables.map((v, i) => (
+                    <span key={i} className="badge badge-info" style={{ marginRight: '4px' }}>${'{' + v.name + '}'}</span>
+                  ))}
+                </div>
+              )}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
                 <button className="btn btn-ghost btn-sm" onClick={() => setSelectedMacro(macro)}>상세</button>
-                <button className="btn btn-ghost btn-sm">수정</button>
-                <button className="btn btn-ghost btn-sm" style={{ color: 'var(--color-danger)' }}>삭제</button>
+                <button className="btn btn-ghost btn-sm" style={{ color: 'var(--color-danger)' }} onClick={() => handleDelete(macro.id)}>삭제</button>
               </div>
             </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
+
+      {pagination && pagination.totalPages > 1 && (
+        <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', marginTop: '24px' }}>
+          <button className="btn btn-ghost btn-sm" disabled={pagination.page <= 1} onClick={() => fetchMacros(pagination.page - 1)}>← 이전</button>
+          <span style={{ padding: '8px', color: 'var(--color-text-secondary)' }}>{pagination.page} / {pagination.totalPages}</span>
+          <button className="btn btn-ghost btn-sm" disabled={pagination.page >= pagination.totalPages} onClick={() => fetchMacros(pagination.page + 1)}>다음 →</button>
+        </div>
+      )}
 
       {showModal && (
         <div className="modal-overlay active" onClick={() => setShowModal(false)}>
