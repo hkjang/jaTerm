@@ -10,6 +10,8 @@ import {
   BackupCode,
   UserOTPStatus,
   OTPStatus,
+  MFAPolicy,
+  SystemMFASettings,
 } from './otp-types';
 
 // Configure otplib
@@ -363,3 +365,156 @@ export async function regenerateBackupCodes(userId: string): Promise<string[]> {
   
   return codes;
 }
+
+// ============================================
+// System MFA Policy Functions
+// ============================================
+
+const DEFAULT_MFA_SETTINGS: SystemMFASettings = {
+  policy: 'OPTIONAL',
+  requiredRoles: ['ADMIN', 'SUPER'],
+  gracePeriodDays: 7,
+  enforcementDate: null,
+};
+
+/**
+ * Get system-wide MFA policy settings
+ */
+export async function getSystemMFASettings(): Promise<SystemMFASettings> {
+  const settings = await prisma.systemSettings.findUnique({
+    where: { id: 'default' },
+  });
+  
+  if (!settings) {
+    return DEFAULT_MFA_SETTINGS;
+  }
+  
+  return {
+    policy: settings.mfaPolicy as MFAPolicy,
+    requiredRoles: settings.mfaRequiredRoles 
+      ? JSON.parse(settings.mfaRequiredRoles) 
+      : DEFAULT_MFA_SETTINGS.requiredRoles,
+    gracePeriodDays: settings.mfaGracePeriodDays,
+    enforcementDate: settings.mfaEnforcementDate,
+  };
+}
+
+/**
+ * Update system-wide MFA policy settings
+ */
+export async function updateSystemMFASettings(
+  settings: Partial<SystemMFASettings>,
+  adminUserId: string
+): Promise<SystemMFASettings> {
+  const updateData: Record<string, unknown> = {
+    updatedBy: adminUserId,
+  };
+
+  if (settings.policy !== undefined) {
+    updateData.mfaPolicy = settings.policy;
+  }
+  if (settings.requiredRoles !== undefined) {
+    updateData.mfaRequiredRoles = JSON.stringify(settings.requiredRoles);
+  }
+  if (settings.gracePeriodDays !== undefined) {
+    updateData.mfaGracePeriodDays = settings.gracePeriodDays;
+  }
+  if (settings.enforcementDate !== undefined) {
+    updateData.mfaEnforcementDate = settings.enforcementDate;
+  }
+
+  const updated = await prisma.systemSettings.upsert({
+    where: { id: 'default' },
+    update: updateData,
+    create: {
+      id: 'default',
+      mfaPolicy: settings.policy ?? 'OPTIONAL',
+      mfaRequiredRoles: settings.requiredRoles 
+        ? JSON.stringify(settings.requiredRoles) 
+        : JSON.stringify(DEFAULT_MFA_SETTINGS.requiredRoles),
+      mfaGracePeriodDays: settings.gracePeriodDays ?? 7,
+      mfaEnforcementDate: settings.enforcementDate ?? null,
+      updatedBy: adminUserId,
+    },
+  });
+
+  return {
+    policy: updated.mfaPolicy as MFAPolicy,
+    requiredRoles: updated.mfaRequiredRoles 
+      ? JSON.parse(updated.mfaRequiredRoles) 
+      : DEFAULT_MFA_SETTINGS.requiredRoles,
+    gracePeriodDays: updated.mfaGracePeriodDays,
+    enforcementDate: updated.mfaEnforcementDate,
+  };
+}
+
+/**
+ * Check if MFA is required for a specific user based on system policy
+ */
+export async function isUserMFARequired(userId: string): Promise<{
+  required: boolean;
+  reason: string;
+  gracePeriodEnds?: Date;
+}> {
+  const [settings, user] = await Promise.all([
+    getSystemMFASettings(),
+    prisma.user.findUnique({
+      where: { id: userId },
+      select: { 
+        role: true, 
+        createdAt: true,
+        mfaEnabled: true,
+      },
+    }),
+  ]);
+
+  if (!user) {
+    return { required: false, reason: 'User not found' };
+  }
+
+  // Policy: DISABLED - No one needs MFA
+  if (settings.policy === 'DISABLED') {
+    return { required: false, reason: 'MFA is disabled system-wide' };
+  }
+
+  // Policy: OPTIONAL - User's choice
+  if (settings.policy === 'OPTIONAL') {
+    return { required: false, reason: 'MFA is optional' };
+  }
+
+  // Check grace period for new users
+  const gracePeriodEnds = new Date(user.createdAt);
+  gracePeriodEnds.setDate(gracePeriodEnds.getDate() + settings.gracePeriodDays);
+  
+  if (new Date() < gracePeriodEnds) {
+    return { 
+      required: false, 
+      reason: 'Within grace period',
+      gracePeriodEnds,
+    };
+  }
+
+  // Check enforcement date
+  if (settings.enforcementDate && new Date() < settings.enforcementDate) {
+    return { 
+      required: false, 
+      reason: 'Before enforcement date',
+      gracePeriodEnds: settings.enforcementDate,
+    };
+  }
+
+  // Policy: ROLE_BASED - Check if user's role requires MFA
+  if (settings.policy === 'ROLE_BASED') {
+    const roleRequiresMFA = settings.requiredRoles.includes(user.role);
+    return { 
+      required: roleRequiresMFA, 
+      reason: roleRequiresMFA 
+        ? `Role ${user.role} requires MFA` 
+        : 'Role does not require MFA' 
+    };
+  }
+
+  // Policy: REQUIRED - Everyone needs MFA
+  return { required: true, reason: 'MFA is required for all users' };
+}
+

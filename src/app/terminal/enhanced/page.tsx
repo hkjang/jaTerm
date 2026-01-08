@@ -15,6 +15,10 @@ import {
   autoLockManager,
   generateWatermark,
   analyzeCommand,
+  validateCommand,
+  simulateDryRun,
+  requiresConfirmation,
+  DryRunResult,
 } from '@/lib/terminal';
 import TerminalTabBar from '@/components/terminal/TerminalTabBar';
 import TerminalSettingsPanel from '@/components/terminal/TerminalSettingsPanel';
@@ -24,6 +28,14 @@ import BroadcastPanel from '@/components/terminal/BroadcastPanel';
 import MacrosPanel from '@/components/terminal/MacrosPanel';
 import CollaborationPanel from '@/components/terminal/CollaborationPanel';
 import TerminalStatusBar from '@/components/terminal/TerminalStatusBar';
+// Phase 1-10 UX Enhancement Components
+import DangerousCommandConfirm from '@/components/terminal/DangerousCommandConfirm';
+import SessionTimeoutAlert from '@/components/terminal/SessionTimeoutAlert';
+import DryRunPanel from '@/components/terminal/DryRunPanel';
+import AIAssistPanel from '@/components/terminal/AIAssistPanel';
+import ServerSearch from '@/components/terminal/ServerSearch';
+import BeginnerMode from '@/components/terminal/BeginnerMode';
+import MobileKeyboard from '@/components/terminal/MobileKeyboard';
 
 interface Server {
   id: string;
@@ -88,6 +100,26 @@ export default function EnhancedTerminalPage() {
   // Security
   const [isLocked, setIsLocked] = useState(false);
   const [lockPassword, setLockPassword] = useState('');
+
+  // Phase 1: 실수 방지 UX State
+  const [showDangerConfirm, setShowDangerConfirm] = useState(false);
+  const [pendingCommand, setPendingCommand] = useState('');
+  const [pendingValidation, setPendingValidation] = useState<ReturnType<typeof validateCommand> | null>(null);
+  const [dryRunResult, setDryRunResult] = useState<DryRunResult | null>(null);
+  const [showSessionTimeout, setShowSessionTimeout] = useState(false);
+  const [sessionTimeRemaining, setSessionTimeRemaining] = useState(30 * 60); // 30 minutes
+
+  // Phase 3: AI Panel State
+  const [showAIAssist, setShowAIAssist] = useState(false);
+
+  // Phase 7: Learning UX State
+  const [beginnerModeEnabled, setBeginnerModeEnabled] = useState(false);
+
+  // Phase 10: Mobile State
+  const [showMobileKeyboard, setShowMobileKeyboard] = useState(false);
+
+  // Favorite servers (Phase 4)
+  const [favoriteServers, setFavoriteServers] = useState<string[]>([]);
 
   // Terminal ref
   const terminalBodyRef = useRef<HTMLDivElement>(null);
@@ -178,7 +210,7 @@ export default function EnhancedTerminalPage() {
     }, 1500);
   };
 
-  // Execute command
+  // Execute command - with dangerous command check
   const executeCommand = (cmd: string) => {
     handleActivity();
     const trimmedCmd = cmd.trim();
@@ -187,16 +219,34 @@ export default function EnhancedTerminalPage() {
     const activeTab = tabs.find(t => t.id === activeTabId);
     if (!activeTab) return;
 
+    // Phase 1: Check if command requires confirmation
+    const validation = validateCommand(trimmedCmd);
+    if (requiresConfirmation(trimmedCmd, activeTab.environment)) {
+      setPendingCommand(trimmedCmd);
+      setPendingValidation(validation);
+      setShowDangerConfirm(true);
+      return;
+    }
+
+    // Execute directly if safe
+    executeConfirmedCommand(trimmedCmd);
+  };
+
+  // Execute command after confirmation
+  const executeConfirmedCommand = (cmd: string) => {
+    const activeTab = tabs.find(t => t.id === activeTabId);
+    if (!activeTab) return;
+
     // Add to output
     setOutputHistory(prev => [...prev, {
       type: 'input',
-      text: `demo@${activeTab.serverName}:${currentDir}$ ${trimmedCmd}`,
+      text: `demo@${activeTab.serverName}:${currentDir}$ ${cmd}`,
     }]);
 
     // Analyze command
-    const analysis = analyzeCommand(trimmedCmd);
+    const analysis = analyzeCommand(cmd);
 
-    // Check if blocked
+    // Check if blocked (critical risk)
     if (analysis.riskLevel === 'critical') {
       setOutputHistory(prev => [
         ...prev,
@@ -210,7 +260,7 @@ export default function EnhancedTerminalPage() {
         id: `cmd_${Date.now()}`,
         sessionId: activeTabId!,
         serverId: activeTab.serverId,
-        command: trimmedCmd,
+        command: cmd,
         riskScore: analysis.riskScore,
         blocked: true,
         executedAt: new Date(),
@@ -221,20 +271,53 @@ export default function EnhancedTerminalPage() {
     }
 
     // Process command
-    processCommand(trimmedCmd, activeTab);
+    processCommand(cmd, activeTab);
 
     // Add to history
     const historyItem: CommandHistoryItem = {
       id: `cmd_${Date.now()}`,
       sessionId: activeTabId!,
       serverId: activeTab.serverId,
-      command: trimmedCmd,
+      command: cmd,
       riskScore: analysis.riskScore,
       blocked: false,
       executedAt: new Date(),
       tags: [],
     };
     setCommandHistory(prev => [historyItem, ...prev]);
+  };
+
+  // Handle Dry Run
+  const handleDryRun = () => {
+    if (pendingCommand) {
+      const result = simulateDryRun(pendingCommand);
+      setDryRunResult(result);
+      setShowDangerConfirm(false);
+    }
+  };
+
+  // Handle confirmed dangerous command
+  const handleConfirmDangerous = () => {
+    if (pendingCommand) {
+      executeConfirmedCommand(pendingCommand);
+      setPendingCommand('');
+      setPendingValidation(null);
+      setShowDangerConfirm(false);
+    }
+  };
+
+  // Close Dry Run panel
+  const closeDryRunPanel = () => {
+    setDryRunResult(null);
+  };
+
+  // Execute from Dry Run
+  const handleExecuteFromDryRun = () => {
+    if (pendingCommand) {
+      executeConfirmedCommand(pendingCommand);
+      setPendingCommand('');
+      setDryRunResult(null);
+    }
   };
 
   // Process command
@@ -634,11 +717,14 @@ export default function EnhancedTerminalPage() {
           )}
 
           <div className="header-actions">
+            <button className="btn btn-ghost btn-sm" onClick={() => setShowAIAssist(true)} title="AI 어시스턴트">
+              🤖
+            </button>
             <button className="btn btn-ghost btn-sm" onClick={() => setShowBroadcast(true)} title="브로드캐스트">
               🌐
             </button>
             <button className="btn btn-ghost btn-sm" onClick={() => setShowMacros(true)} title="매크로">
-              🤖
+              ⚡
             </button>
             <button className="btn btn-ghost btn-sm" onClick={() => setShowHistory(true)} title="히스토리">
               📜
@@ -848,6 +934,28 @@ export default function EnhancedTerminalPage() {
               <button className="modal-close" onClick={() => setShowServerSelector(false)}>×</button>
             </div>
             <div className="modal-body">
+              {/* Enhanced Server Search */}
+              <div style={{ marginBottom: '16px' }}>
+                <ServerSearch
+                  servers={DEMO_SERVERS.map(s => ({
+                    ...s,
+                    isFavorite: favoriteServers.includes(s.id),
+                  }))}
+                  onSelectServer={(server) => {
+                    connectToServer(server);
+                    setShowServerSelector(false);
+                  }}
+                  onToggleFavorite={(id) => {
+                    setFavoriteServers(prev => 
+                      prev.includes(id) 
+                        ? prev.filter(sid => sid !== id)
+                        : [...prev, id]
+                    );
+                  }}
+                  selectedServerId={activeTab?.serverId}
+                />
+              </div>
+              
               {['PROD', 'STAGE', 'DEV'].map(env => (
                 <div key={env} className="env-section">
                   <div className="env-header">
@@ -880,6 +988,112 @@ export default function EnhancedTerminalPage() {
           </div>
         </>
       )}
+
+      {/* Phase 1: Dangerous Command Confirmation Modal */}
+      {showDangerConfirm && pendingValidation && activeTab && (
+        <DangerousCommandConfirm
+          isOpen={showDangerConfirm}
+          command={pendingCommand}
+          serverName={activeTab.serverName}
+          serverEnvironment={activeTab.environment}
+          validation={pendingValidation}
+          onConfirm={handleConfirmDangerous}
+          onCancel={() => {
+            setShowDangerConfirm(false);
+            setPendingCommand('');
+            setPendingValidation(null);
+          }}
+          onDryRun={handleDryRun}
+        />
+      )}
+
+      {/* Phase 1: Dry Run Panel */}
+      {dryRunResult && (
+        <div style={{
+          position: 'fixed',
+          bottom: '80px',
+          right: '16px',
+          width: '400px',
+          zIndex: 1000,
+        }}>
+          <DryRunPanel
+            result={dryRunResult}
+            onClose={closeDryRunPanel}
+            onExecute={handleExecuteFromDryRun}
+          />
+        </div>
+      )}
+
+      {/* Phase 1: Session Timeout Alert */}
+      <SessionTimeoutAlert
+        timeoutMinutes={30}
+        warningMinutes={5}
+        isActive={activeTab !== undefined}
+        onExtend={() => {
+          // Activity was detected, timer was reset
+        }}
+        onTimeout={() => {
+          // Close all tabs and logout
+          setTabs([]);
+          setActiveTabId(null);
+        }}
+      />
+
+      {/* Phase 3: AI Assist Panel */}
+      {activeTab && (
+        <AIAssistPanel
+          serverName={activeTab.serverName}
+          serverEnvironment={activeTab.environment}
+          onCommandSuggested={(cmd) => {
+            setCurrentInput(cmd);
+            setShowAIAssist(false);
+          }}
+          commandHistory={commandHistory.map(h => h.command)}
+          isOpen={showAIAssist}
+          onClose={() => setShowAIAssist(false)}
+        />
+      )}
+
+      {/* Phase 7: Beginner Mode */}
+      <BeginnerMode
+        isEnabled={beginnerModeEnabled}
+        onToggle={setBeginnerModeEnabled}
+        currentCommand={currentInput}
+        serverEnvironment={activeTab?.environment}
+      />
+
+      {/* Phase 10: Mobile Keyboard */}
+      <MobileKeyboard
+        onKeyPress={(key) => {
+          setCurrentInput(prev => prev + key);
+        }}
+        onSpecialKey={(key) => {
+          switch (key) {
+            case 'enter':
+              if (currentInput.trim()) {
+                executeCommand(currentInput);
+                setCurrentInput('');
+              }
+              break;
+            case 'ctrl-c':
+              setOutputHistory(prev => [...prev, { type: 'warning', text: '^C' }]);
+              setCurrentInput('');
+              break;
+            case 'up':
+              // Navigate history up
+              if (commandHistory.length > 0) {
+                setCurrentInput(commandHistory[0].command);
+              }
+              break;
+            case 'down':
+              setCurrentInput('');
+              break;
+          }
+        }}
+        isVisible={showMobileKeyboard}
+        onToggle={() => setShowMobileKeyboard(!showMobileKeyboard)}
+      />
+
 
       <style jsx>{`
         .terminal-page {

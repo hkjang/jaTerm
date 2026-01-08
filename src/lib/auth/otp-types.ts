@@ -27,6 +27,20 @@ export type OTPStatus =
   | 'LOCKED'         // Too many failed attempts
   | 'RESET_REQUIRED'; // Admin reset, needs re-setup
 
+// System-level MFA Policy
+export type MFAPolicy = 
+  | 'DISABLED'    // MFA disabled for all users
+  | 'OPTIONAL'    // Users can choose whether to enable MFA
+  | 'ROLE_BASED'  // MFA required for specific roles only
+  | 'REQUIRED';   // MFA required for all users
+
+export interface SystemMFASettings {
+  policy: MFAPolicy;
+  requiredRoles: string[];
+  gracePeriodDays: number;
+  enforcementDate: Date | null;
+}
+
 export interface OTPSetupResult {
   secret: string;
   qrCodeUrl: string;
