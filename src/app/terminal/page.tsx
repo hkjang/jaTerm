@@ -19,6 +19,7 @@ interface EnhancedTab extends TerminalTab {
   lastConnectedAt?: Date;
   commandCount: number;
   output?: string[];
+  sessionId?: string; // API session ID for backend tracking
 }
 
 interface ContextMenu {
@@ -344,7 +345,13 @@ export default function TerminalPage() {
     );
   };
 
-  const handleServerSelect = useCallback((server: Server) => {
+  const handleServerSelect = useCallback(async (server: Server) => {
+    // Check if user is authenticated
+    if (!user) {
+      setNotifications(prev => [...prev, { id: Date.now().toString(), message: '로그인이 필요합니다', type: 'warning' }]);
+      return;
+    }
+
     const existingTab = tabs.find(t => t.serverId === server.id);
     
     if (existingTab) {
@@ -352,12 +359,21 @@ export default function TerminalPage() {
         setActiveTabId(existingTab.id);
         return;
       }
+      // Reconnect existing tab
       setTabs(prev => prev.map(t => 
         t.id === existingTab.id 
           ? { ...t, status: 'connecting' as const, canReconnect: false }
           : t
       ));
       setActiveTabId(existingTab.id);
+      
+      // Try to update session status via API
+      if (existingTab.sessionId) {
+        try {
+          await updateSessionStatus(existingTab.sessionId, 'ACTIVE');
+        } catch (e) { /* Continue with simulated connection */ }
+      }
+      
       setTimeout(() => {
         setTabs(prev => prev.map(t => 
           t.id === existingTab.id 
@@ -366,6 +382,17 @@ export default function TerminalPage() {
         ));
       }, 1000);
       return;
+    }
+
+    // Create new session via API
+    let sessionId: string | undefined;
+    try {
+      const session = await createSession(server.id, `터미널 연결: ${server.name}`);
+      if (session) {
+        sessionId = session.id;
+      }
+    } catch (e) {
+      console.warn('Session creation failed, using local tracking:', e);
     }
 
     const newTab: EnhancedTab = {
@@ -381,6 +408,7 @@ export default function TerminalPage() {
       canReconnect: false,
       lastConnectedAt: undefined,
       commandCount: 0,
+      sessionId, // Track API session ID
     };
 
     setTabs(prev => [...prev, newTab]);
@@ -398,16 +426,44 @@ export default function TerminalPage() {
       return newHistory;
     });
 
-    setTimeout(() => {
+    // Simulate connection (in production, this would be WebSocket connection)
+    setTimeout(async () => {
       setTabs(prev => prev.map(t => 
         t.id === newTab.id 
           ? { ...t, status: 'connected' as const, lastConnectedAt: new Date() }
           : t
       ));
+      
+      // Update session status to active
+      if (sessionId) {
+        try {
+          await updateSessionStatus(sessionId, 'ACTIVE');
+        } catch (e) { /* Session tracking continues locally */ }
+      }
+      
+      // Show success notification
+      setNotifications(prev => [...prev, { 
+        id: Date.now().toString(), 
+        message: `${server.name}에 연결되었습니다`, 
+        type: 'success' 
+      }]);
+      setTimeout(() => setNotifications(prev => prev.slice(1)), 3000);
     }, 1000);
-  }, [tabs]);
+  }, [tabs, user, createSession, updateSessionStatus]);
 
-  const handleTabClose = useCallback((tabId: string) => {
+  const handleTabClose = useCallback(async (tabId: string) => {
+    // Find tab to get session ID before removing
+    const tabToClose = tabs.find(t => t.id === tabId);
+    
+    // Terminate session via API if exists
+    if (tabToClose?.sessionId) {
+      try {
+        await terminateSession(tabToClose.sessionId);
+      } catch (e) {
+        console.warn('Failed to terminate session:', e);
+      }
+    }
+    
     setTabs(prev => {
       const newTabs = prev.filter(t => t.id !== tabId);
       if (activeTabId === tabId && newTabs.length > 0) {
@@ -422,7 +478,7 @@ export default function TerminalPage() {
       }
       return newTabs;
     });
-  }, [activeTabId, secondaryTabId]);
+  }, [activeTabId, secondaryTabId, tabs, terminateSession]);
 
   const handleCloseOtherTabs = useCallback((tabId: string) => {
     setTabs(prev => prev.filter(t => t.id === tabId));
