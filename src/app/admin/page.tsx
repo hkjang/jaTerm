@@ -288,6 +288,27 @@ export default function AdminDashboard() {
       </main>
 
       <style jsx global>{`
+        .admin-container {
+          display: flex;
+          min-height: 100vh;
+        }
+        .admin-main {
+          flex: 1;
+          margin-left: var(--sidebar-width, 260px);
+          padding: 24px;
+          overflow: auto;
+        }
+        .content-header {
+          margin-bottom: 24px;
+        }
+        .content-title {
+          font-size: 1.5rem;
+          font-weight: 600;
+          margin-bottom: 8px;
+        }
+        .content-description {
+          color: var(--color-text-secondary);
+        }
         @keyframes pulse {
           0%, 100% { opacity: 1; }
           50% { opacity: 0.5; }
