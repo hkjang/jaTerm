@@ -518,6 +518,108 @@ async function main() {
 
   console.log('✅ Scheduled tasks created');
 
+  // Create sample emergency accesses
+  const emergencyAccesses = [
+    {
+      id: 'emerg-1',
+      requesterId: admin.id,
+      serverId: createdServers[0].id,
+      reason: '긴급 서비스 장애 대응 - 502 에러 다수 발생',
+      status: 'EXPIRED',
+      grantedAt: new Date(Date.now() - 7200000),
+      expiresAt: new Date(Date.now() - 3600000),
+      commandCount: 15,
+    },
+  ];
+
+  for (const acc of emergencyAccesses) {
+    await prisma.emergencyAccess.upsert({
+      where: { id: acc.id },
+      update: {},
+      create: acc,
+    });
+  }
+
+  console.log('✅ Emergency accesses created');
+
+  // Create sample compliance reports
+  const complianceReports = [
+    {
+      id: 'comp-1',
+      name: 'ISMS 월간 보고서',
+      type: 'ISMS',
+      period: '2024-12',
+      status: 'PASS',
+      findings: 0,
+      generatedBy: admin.id,
+    },
+    {
+      id: 'comp-2',
+      name: 'ISO 27001 감사',
+      type: 'ISO27001',
+      period: '2024-Q4',
+      status: 'WARNING',
+      findings: 2,
+      generatedBy: admin.id,
+    },
+  ];
+
+  for (const report of complianceReports) {
+    await prisma.complianceReport.upsert({
+      where: { id: report.id },
+      update: {},
+      create: report,
+    });
+  }
+
+  console.log('✅ Compliance reports created');
+
+  // Create sample anomaly rules
+  const anomalyRules = [
+    {
+      id: 'rule-1',
+      name: '비정상 접속 시간',
+      description: '평소와 다른 시간대 접속 감지',
+      type: 'TIME',
+      threshold: 0.8,
+      isActive: true,
+    },
+    {
+      id: 'rule-2',
+      name: '새로운 IP 접속',
+      description: '처음 접속하는 IP에서 로그인',
+      type: 'LOCATION',
+      threshold: 0.7,
+      isActive: true,
+    },
+    {
+      id: 'rule-3',
+      name: '위험 명령 패턴',
+      description: '위험 명령 연속 실행 감지',
+      type: 'COMMAND',
+      threshold: 0.9,
+      isActive: true,
+    },
+    {
+      id: 'rule-4',
+      name: '이상 행동 패턴',
+      description: '평소와 다른 명령 사용 패턴',
+      type: 'BEHAVIOR',
+      threshold: 0.75,
+      isActive: true,
+    },
+  ];
+
+  for (const rule of anomalyRules) {
+    await prisma.anomalyRule.upsert({
+      where: { id: rule.id },
+      update: {},
+      create: rule,
+    });
+  }
+
+  console.log('✅ Anomaly rules created');
+
   console.log('🎉 Database seeding completed!');
 }
 

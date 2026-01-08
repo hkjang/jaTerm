@@ -1,53 +1,97 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import AdminLayout from '@/components/admin/AdminLayout';
 
 interface AnomalyRule {
   id: string;
   name: string;
-  description: string;
-  type: 'TIME' | 'LOCATION' | 'COMMAND' | 'BEHAVIOR';
+  description: string | null;
+  type: string;
   threshold: number;
   isActive: boolean;
 }
 
-const mockRules: AnomalyRule[] = [
-  { id: '1', name: '비정상 접속 시간', description: '평소와 다른 시간대 접속 감지', type: 'TIME', threshold: 0.8, isActive: true },
-  { id: '2', name: '새로운 IP 접속', description: '처음 접속하는 IP에서 로그인', type: 'LOCATION', threshold: 0.7, isActive: true },
-  { id: '3', name: '위험 명령 패턴', description: '위험 명령 연속 실행 감지', type: 'COMMAND', threshold: 0.9, isActive: true },
-  { id: '4', name: '이상 행동 패턴', description: '평소와 다른 명령 사용 패턴', type: 'BEHAVIOR', threshold: 0.75, isActive: true },
-];
+interface Stats {
+  activeRules: number;
+  todayDetections: number;
+  todayBlocks: number;
+}
 
 export default function AISecurityPage() {
-  const [rules] = useState(mockRules);
+  const [rules, setRules] = useState<AnomalyRule[]>([]);
+  const [stats, setStats] = useState<Stats>({ activeRules: 0, todayDetections: 0, todayBlocks: 0 });
+  const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+
+  const getAuthHeaders = (): Record<string, string> => {
+    if (typeof window === 'undefined') return {};
+    const user = localStorage.getItem('user');
+    if (!user) return {};
+    try {
+      const { id } = JSON.parse(user);
+      return { 'Authorization': `Bearer ${id}` };
+    } catch {
+      return {};
+    }
+  };
+
+  const fetchRules = useCallback(async () => {
+    setLoading(true);
+    try {
+      const response = await fetch('/api/admin/ai-security', {
+        headers: getAuthHeaders(),
+      });
+      if (!response.ok) throw new Error('Failed to fetch');
+      const data = await response.json();
+      setRules(data.rules);
+      setStats(data.stats);
+      setError('');
+    } catch (err) {
+      setError('규칙을 불러오는데 실패했습니다.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchRules();
+  }, [fetchRules]);
+
+  const handleToggle = async (rule: AnomalyRule) => {
+    try {
+      await fetch('/api/admin/ai-security', {
+        method: 'PUT',
+        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: rule.id, isActive: !rule.isActive }),
+      });
+      setSuccess(rule.isActive ? '규칙이 비활성화되었습니다.' : '규칙이 활성화되었습니다.');
+      fetchRules();
+    } catch (err) {
+      setError('상태 변경에 실패했습니다.');
+    }
+  };
 
   return (
     <AdminLayout title="AI 보안" description="AI 기반 이상 행위 탐지 및 자동 차단 설정">
+      {success && <div className="alert alert-success" style={{ marginBottom: '16px' }}>{success}<button onClick={() => setSuccess('')} style={{ float: 'right', background: 'none', border: 'none', cursor: 'pointer' }}>×</button></div>}
+      {error && <div className="alert alert-danger" style={{ marginBottom: '16px' }}>{error}<button onClick={() => setError('')} style={{ float: 'right', background: 'none', border: 'none', cursor: 'pointer' }}>×</button></div>}
       
       <div className="dashboard-grid" style={{ marginBottom: '24px', gridTemplateColumns: 'repeat(4, 1fr)' }}>
-        <div className="stat-card"><div className="stat-label">활성 규칙</div><div className="stat-value">{rules.filter(r => r.isActive).length}</div></div>
-        <div className="stat-card"><div className="stat-label">오늘 탐지</div><div className="stat-value">12</div></div>
-        <div className="stat-card"><div className="stat-label">자동 차단</div><div className="stat-value">3</div></div>
+        <div className="stat-card"><div className="stat-label">활성 규칙</div><div className="stat-value">{stats.activeRules}</div></div>
+        <div className="stat-card"><div className="stat-label">오늘 탐지</div><div className="stat-value">{stats.todayDetections}</div></div>
+        <div className="stat-card"><div className="stat-label">자동 차단</div><div className="stat-value">{stats.todayBlocks}</div></div>
         <div className="stat-card"><div className="stat-label">학습 데이터</div><div className="stat-value">1.2M</div></div>
       </div>
 
       <div className="card" style={{ marginBottom: '24px', padding: '20px' }}>
         <h3 style={{ fontWeight: 600, marginBottom: '16px' }}>🤖 AI 모델 상태</h3>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
-          <div style={{ background: 'var(--color-surface)', padding: '16px', borderRadius: 'var(--radius-md)' }}>
-            <div style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>모델 버전</div>
-            <div style={{ fontSize: '1.25rem', fontWeight: 600 }}>v2.3.1</div>
-          </div>
-          <div style={{ background: 'var(--color-surface)', padding: '16px', borderRadius: 'var(--radius-md)' }}>
-            <div style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>정확도</div>
-            <div style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--color-success)' }}>94.2%</div>
-          </div>
-          <div style={{ background: 'var(--color-surface)', padding: '16px', borderRadius: 'var(--radius-md)' }}>
-            <div style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>마지막 학습</div>
-            <div style={{ fontSize: '1.25rem', fontWeight: 600 }}>2시간 전</div>
-          </div>
+          <div style={{ background: 'var(--color-surface)', padding: '16px', borderRadius: 'var(--radius-md)' }}><div style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>모델 버전</div><div style={{ fontSize: '1.25rem', fontWeight: 600 }}>v2.3.1</div></div>
+          <div style={{ background: 'var(--color-surface)', padding: '16px', borderRadius: 'var(--radius-md)' }}><div style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>정확도</div><div style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--color-success)' }}>94.2%</div></div>
+          <div style={{ background: 'var(--color-surface)', padding: '16px', borderRadius: 'var(--radius-md)' }}><div style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>마지막 학습</div><div style={{ fontSize: '1.25rem', fontWeight: 600 }}>2시간 전</div></div>
         </div>
       </div>
 
@@ -57,25 +101,31 @@ export default function AISecurityPage() {
           <button className="btn btn-primary btn-sm" onClick={() => setShowModal(true)}>+ 규칙 추가</button>
         </div>
         
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          {rules.map(rule => (
-            <div key={rule.id} style={{ display: 'flex', alignItems: 'center', gap: '16px', padding: '16px', background: 'var(--color-surface)', borderRadius: 'var(--radius-md)' }}>
-              <div style={{ flex: 1 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                  <span style={{ fontWeight: 500 }}>{rule.name}</span>
-                  <span className="badge badge-info">{rule.type}</span>
-                  <span className={`badge ${rule.isActive ? 'badge-success' : 'badge-danger'}`}>{rule.isActive ? '활성' : '비활성'}</span>
+        {loading ? (
+          <div style={{ display: 'flex', justifyContent: 'center', padding: '40px' }}><span className="spinner" style={{ width: '32px', height: '32px' }} /></div>
+        ) : rules.length === 0 ? (
+          <div style={{ padding: '40px', textAlign: 'center', color: 'var(--color-text-muted)' }}>탐지 규칙이 없습니다.</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            {rules.map(rule => (
+              <div key={rule.id} style={{ display: 'flex', alignItems: 'center', gap: '16px', padding: '16px', background: 'var(--color-surface)', borderRadius: 'var(--radius-md)' }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                    <span style={{ fontWeight: 500 }}>{rule.name}</span>
+                    <span className="badge badge-info">{rule.type}</span>
+                    <span className={`badge ${rule.isActive ? 'badge-success' : 'badge-danger'}`}>{rule.isActive ? '활성' : '비활성'}</span>
+                  </div>
+                  <div style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>{rule.description || '설명 없음'}</div>
                 </div>
-                <div style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>{rule.description}</div>
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>임계치</div>
+                  <div style={{ fontSize: '1.25rem', fontWeight: 600 }}>{Math.round(rule.threshold * 100)}%</div>
+                </div>
+                <button className="btn btn-ghost btn-sm" onClick={() => handleToggle(rule)}>{rule.isActive ? '비활성화' : '활성화'}</button>
               </div>
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>임계치</div>
-                <div style={{ fontSize: '1.25rem', fontWeight: 600 }}>{Math.round(rule.threshold * 100)}%</div>
-              </div>
-              <button className="btn btn-ghost btn-sm">수정</button>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="card">
@@ -85,7 +135,6 @@ export default function AISecurityPage() {
           <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><input type="checkbox" defaultChecked /> 이메일 알림 (HIGH 이상)</label>
           <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><input type="checkbox" /> SMS 알림 (CRITICAL만)</label>
           <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><input type="checkbox" defaultChecked /> 일간 리포트 자동 생성</label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><input type="checkbox" defaultChecked /> 월간 리포트 자동 생성</label>
         </div>
       </div>
 
