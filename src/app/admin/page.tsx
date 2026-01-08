@@ -38,8 +38,9 @@ interface DashboardData {
 }
 
 export default function AdminDashboard() {
-  const [currentTime, setCurrentTime] = useState(new Date());
-  const [lastRefresh, setLastRefresh] = useState(new Date());
+  const [mounted, setMounted] = useState(false);
+  const [currentTime, setCurrentTime] = useState<Date | null>(null);
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   
   // Use the new hook with auto-refresh every 30 seconds
   const { data, loading, error, refetch } = useAdminApi<DashboardData>(
@@ -47,8 +48,11 @@ export default function AdminDashboard() {
     { autoRefresh: 30000 }
   );
 
-  // Update current time every second
+  // Client-only: set mounted and start time updates
   useEffect(() => {
+    setMounted(true);
+    setCurrentTime(new Date());
+    setLastRefresh(new Date());
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
@@ -80,6 +84,7 @@ export default function AdminDashboard() {
   };
 
   const getTimeSinceRefresh = () => {
+    if (!currentTime || !lastRefresh) return '...';
     const seconds = Math.floor((currentTime.getTime() - lastRefresh.getTime()) / 1000);
     if (seconds < 60) return `${seconds}초 전`;
     return `${Math.floor(seconds / 60)}분 전`;
@@ -110,7 +115,7 @@ export default function AdminDashboard() {
               </span>
             </div>
             <span style={{ fontSize: '1.1rem', fontWeight: 500, fontFamily: 'var(--font-mono)' }}>
-              {currentTime.toLocaleTimeString('ko-KR')}
+              {mounted && currentTime ? currentTime.toLocaleTimeString('ko-KR') : '--:--:--'}
             </span>
             <button className="btn btn-ghost" onClick={refetch} disabled={loading}>
               🔄 새로고침
