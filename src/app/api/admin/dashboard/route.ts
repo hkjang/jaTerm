@@ -138,9 +138,81 @@ export async function GET(request: NextRequest) {
         title: alert.title,
         time: alert.createdAt,
       })),
+      // Weekly command trend (last 7 days)
+      commandTrend: await getWeeklyCommandTrend(),
+      // Session distribution by environment
+      sessionDistribution: await getSessionDistribution(),
     });
   } catch (error) {
     console.error('Dashboard stats error:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
+}
+
+// Get weekly command execution trend
+async function getWeeklyCommandTrend() {
+  const trend = [];
+  const days = ['일', '월', '화', '수', '목', '금', '토'];
+  
+  for (let i = 6; i >= 0; i--) {
+    const date = new Date();
+    date.setDate(date.getDate() - i);
+    date.setHours(0, 0, 0, 0);
+    
+    const nextDate = new Date(date);
+    nextDate.setDate(nextDate.getDate() + 1);
+    
+    const count = await prisma.commandLog.count({
+      where: {
+        timestamp: {
+          gte: date,
+          lt: nextDate,
+        },
+      },
+    });
+    
+    trend.push({
+      label: days[date.getDay()],
+      value: count,
+    });
+  }
+  
+  return trend;
+}
+
+// Get session distribution by environment
+async function getSessionDistribution() {
+  const servers = await prisma.server.findMany({
+    select: { id: true, environment: true },
+  });
+  
+  const serverEnvMap = new Map(servers.map(s => [s.id, s.environment]));
+  
+  const sessions = await prisma.terminalSession.findMany({
+    where: {
+      startedAt: {
+        gte: new Date(Date.now() - 24 * 60 * 60 * 1000),
+      },
+    },
+    select: { serverId: true },
+  });
+  
+  const distribution: Record<string, number> = {
+    PROD: 0,
+    STAGE: 0,
+    DEV: 0,
+    OTHER: 0,
+  };
+  
+  sessions.forEach(session => {
+    const env = serverEnvMap.get(session.serverId) || 'OTHER';
+    distribution[env] = (distribution[env] || 0) + 1;
+  });
+  
+  return [
+    { label: 'PROD', value: distribution.PROD, color: 'var(--color-danger)' },
+    { label: 'STAGE', value: distribution.STAGE, color: 'var(--color-warning)' },
+    { label: 'DEV', value: distribution.DEV, color: 'var(--color-success)' },
+    { label: 'OTHER', value: distribution.OTHER, color: 'var(--color-info)' },
+  ].filter(d => d.value > 0);
 }
