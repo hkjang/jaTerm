@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
@@ -90,21 +91,32 @@ const navSections: NavSection[] = [
 
 export default function AdminSidebar() {
   const pathname = usePathname();
+  const sidebarRef = useRef<HTMLElement>(null);
+
+  // Auto-scroll to selected menu item
+  useEffect(() => {
+    if (sidebarRef.current) {
+      const activeLink = sidebarRef.current.querySelector('.sidebar-link.active');
+      if (activeLink) {
+        activeLink.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      }
+    }
+  }, [pathname]);
 
   return (
-    <aside className="sidebar" style={{ position: 'fixed', height: '100vh', overflow: 'auto' }}>
+    <aside ref={sidebarRef} className="sidebar" style={{ position: 'fixed', top: 0, height: '100vh', overflow: 'auto' }}>
       <div style={{ 
-        padding: '16px',
+        padding: '12px 16px',
         borderBottom: '1px solid var(--color-border)',
         display: 'flex',
         alignItems: 'center',
         gap: '10px'
       }}>
-        <div className="header-logo-icon" style={{ width: '32px', height: '32px', fontSize: '1rem' }}>⌘</div>
-        <span style={{ fontWeight: 600 }}>jaTerm Admin</span>
+        <div className="header-logo-icon" style={{ width: '28px', height: '28px', fontSize: '0.9rem' }}>⌘</div>
+        <span style={{ fontWeight: 600, fontSize: '0.95rem' }}>jaTerm Admin</span>
       </div>
 
-      <nav className="sidebar-nav" style={{ paddingBottom: '80px' }}>
+      <nav className="sidebar-nav" style={{ paddingBottom: '120px', paddingTop: '4px' }}>
         {navSections.map((section) => (
           <div key={section.title} className="sidebar-section">
             <div className="sidebar-section-title">{section.title}</div>
@@ -137,11 +149,24 @@ export default function AdminSidebar() {
         width: 'var(--sidebar-width)',
         padding: '16px',
         borderTop: '1px solid var(--color-border)',
-        background: 'var(--color-bg)'
+        background: 'var(--color-bg)',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '8px'
       }}>
         <Link href="/terminal" className="btn btn-secondary btn-sm" style={{ width: '100%' }}>
-          터미널로 이동
+          ⌨️ 터미널로 이동
         </Link>
+        <button 
+          className="btn btn-ghost btn-sm" 
+          style={{ width: '100%', color: 'var(--color-danger)' }}
+          onClick={() => {
+            localStorage.removeItem('user');
+            window.location.href = '/login';
+          }}
+        >
+          🚪 로그아웃
+        </button>
       </div>
     </aside>
   );
