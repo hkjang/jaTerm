@@ -1,17 +1,15 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import Link from 'next/link';
 import DemoTerminal from '@/components/terminal/DemoTerminal';
 import { TerminalTab } from '@/lib/terminal/types';
+import { useServers, Server as ServerData } from '@/hooks/useServers';
+import { useTerminalSessions, SessionRecording } from '@/hooks/useTerminalSessions';
 
-interface Server {
-  id: string;
-  name: string;
-  hostname: string;
-  environment: 'PROD' | 'STAGE' | 'DEV';
+// Extended Server interface for display (with runtime status)
+interface Server extends Omit<ServerData, 'isActive'> {
   status: 'online' | 'offline' | 'maintenance';
-  tags?: string[];
   cpu?: number;
   memory?: number;
 }
@@ -132,7 +130,7 @@ export default function TerminalPage() {
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [draggedTabId, setDraggedTabId] = useState<string | null>(null);
   const [showQuickConnect, setShowQuickConnect] = useState(false);
-  const [favorites, setFavorites] = useState<string[]>(['1', '6']); // Demo favorites
+  const [favorites, setFavorites] = useState<string[]>([]);
   const [connectionHistory, setConnectionHistory] = useState<ConnectionHistory[]>([]);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [commandPaletteQuery, setCommandPaletteQuery] = useState('');
@@ -143,6 +141,39 @@ export default function TerminalPage() {
   const [notifications, setNotifications] = useState<{id: string; message: string; type: 'success' | 'info' | 'warning'}[]>([]);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const commandPaletteRef = useRef<HTMLInputElement>(null);
+
+  // API Hooks - fetch servers and sessions from backend
+  const { servers: apiServers, loading: serversLoading, error: serversError } = useServers({ autoRefresh: true, refreshInterval: 60000 });
+  const { sessions, recordings, createSession, updateSessionStatus, terminateSession } = useTerminalSessions(user?.id);
+
+  // Transform API servers to display format with simulated runtime stats
+  const servers: Server[] = useMemo(() => {
+    if (apiServers.length === 0) {
+      // Fallback to demo data if no servers in database
+      return DEMO_SERVERS;
+    }
+    return apiServers.map(s => ({
+      ...s,
+      status: s.isActive ? 'online' : 'offline',
+      cpu: Math.floor(Math.random() * 80) + 10, // Simulated - would come from monitoring API
+      memory: Math.floor(Math.random() * 70) + 20,
+    })) as Server[];
+  }, [apiServers]);
+
+  // Transform session recordings from API
+  const sessionRecordings = useMemo(() => {
+    if (recordings.length === 0) {
+      return SESSION_RECORDINGS; // Fallback to demo data
+    }
+    return recordings.map(r => ({
+      id: r.id,
+      serverName: r.server.name,
+      date: new Date(r.createdAt).toLocaleString('ko-KR'),
+      duration: r.duration ? formatDuration(r.duration) : '00:00:00',
+      size: '-- MB',
+      user: r.user.name || 'unknown',
+    }));
+  }, [recordings]);
 
   useEffect(() => {
     const storedUser = localStorage.getItem('user');
@@ -469,6 +500,13 @@ export default function TerminalPage() {
     if (hours > 0) return `${hours}시간 ${mins % 60}분`;
     if (mins > 0) return `${mins}분`;
     return `${diff}초`;
+  };
+
+  const formatDuration = (seconds: number): string => {
+    const hrs = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
+    return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
   const formatHistoryTime = (date: Date) => {
