@@ -636,3 +636,55 @@ model CommandPolicy {
   @@index([type])
   @@index([isActive])
 }
+
+// ============================================
+// Emergency, Compliance, AI Security Models (Admin)
+// ============================================
+
+
+model EmergencyAccess {
+  id           String    @id @default(cuid())
+  requesterId  String
+  serverId     String
+  reason       String
+  status       String    @default("ACTIVE") // ACTIVE, EXPIRED, REVOKED
+  grantedAt    DateTime  @default(now())
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  revokedById  String?
+  commandCount Int       @default(0)
+
+  @@index([requesterId])
+  @@index([status])
+  @@index([grantedAt])
+}
+
+model ComplianceReport {
+  id          String   @id @default(cuid())
+  name        String
+  type        String   @default("ISMS") // ISMS, ISO27001, SOC2, CUSTOM
+  period      String   // e.g., "2024-12", "2024-Q4"
+  status      String   @default("PASS") // PASS, FAIL, WARNING
+  findings    Int      @default(0)
+  generatedAt DateTime @default(now())
+  generatedBy String?
+  fileUrl     String?
+  notes       String?
+
+  @@index([type])
+  @@index([generatedAt])
+}
+
+model AnomalyRule {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  type        String   @default("BEHAVIOR") // TIME, LOCATION, COMMAND, BEHAVIOR
+  threshold   Float    @default(0.8)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([type])
+  @@index([isActive])
+}
