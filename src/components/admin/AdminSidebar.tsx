@@ -22,6 +22,7 @@ const navSections: NavSection[] = [
     title: 'Overview',
     items: [
       { href: '/admin', label: '대시보드', icon: '📊' },
+      { href: '/admin/operations', label: '운영 모니터링', icon: '💓' },
     ],
   },
   {
@@ -36,6 +37,7 @@ const navSections: NavSection[] = [
     title: '서버·자원',
     items: [
       { href: '/admin/servers', label: '서버 관리', icon: '🖥️' },
+      { href: '/admin/server-access', label: '접근 권한', icon: '🔐' },
       { href: '/admin/server-groups', label: '서버 그룹', icon: '📦' },
     ],
   },
