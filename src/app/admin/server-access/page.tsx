@@ -61,7 +61,7 @@ export default function ServerAccessPage() {
   const [allUsers, setAllUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
-  const [selectedTab, setSelectedTab] = useState<'users' | 'sessions' | 'policies' | 'settings'>('users');
+  const [selectedTab, setSelectedTab] = useState<'users' | 'sessions' | 'commands' | 'timeline' | 'policies' | 'settings'>('users');
   const [showGrantModal, setShowGrantModal] = useState(false);
   const [grantUserId, setGrantUserId] = useState('');
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -328,12 +328,14 @@ export default function ServerAccessPage() {
               </div>
 
               {/* Tabs */}
-              <div style={{ display: 'flex', gap: '4px', marginBottom: '16px', background: 'var(--color-surface)', padding: '4px', borderRadius: '8px', width: 'fit-content' }}>
+              <div style={{ display: 'flex', gap: '4px', marginBottom: '16px', background: 'var(--color-surface)', padding: '4px', borderRadius: '8px', width: 'fit-content', flexWrap: 'wrap' }}>
                 {[
-                  { id: 'users', label: '👥 접근 사용자' },
-                  { id: 'sessions', label: '📋 세션 이력' },
-                  { id: 'policies', label: '📜 적용 정책' },
-                  { id: 'settings', label: '⚙️ 접근 설정' },
+                  { id: 'users', label: '👥 사용자' },
+                  { id: 'sessions', label: '📋 세션' },
+                  { id: 'commands', label: '⌨️ 명령어' },
+                  { id: 'timeline', label: '📊 타임라인' },
+                  { id: 'policies', label: '📜 정책' },
+                  { id: 'settings', label: '⚙️ 설정' },
                 ].map(tab => (
                   <button
                     key={tab.id}
@@ -423,6 +425,111 @@ export default function ServerAccessPage() {
                   </>
                 )}
 
+                {selectedTab === 'commands' && (
+                  <>
+                    <h3 style={{ fontSize: '1rem', marginBottom: '16px', fontWeight: 600 }}>명령어 로그</h3>
+                    <div style={{ marginBottom: '16px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                      <button className="btn btn-sm btn-ghost" style={{ background: '#ef444420', color: '#ef4444' }}>🚫 차단됨</button>
+                      <button className="btn btn-sm btn-ghost" style={{ background: '#f59e0b20', color: '#f59e0b' }}>⚠️ 위험</button>
+                      <button className="btn btn-sm btn-ghost">🔍 모두</button>
+                      <input type="text" className="form-input" placeholder="명령어 검색..." style={{ width: '200px', padding: '6px 10px' }} />
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontFamily: 'var(--font-mono)', fontSize: '0.85rem', background: 'var(--color-surface)', borderRadius: '8px', padding: '12px', maxHeight: '400px', overflow: 'auto' }}>
+                      {/* Mock command logs */}
+                      {[
+                        { time: '19:21:15', user: 'admin', cmd: 'ls -la /var/log', status: 'ok' },
+                        { time: '19:20:42', user: 'admin', cmd: 'cat /etc/passwd', status: 'warning' },
+                        { time: '19:19:05', user: 'operator', cmd: 'rm -rf /tmp/*', status: 'blocked' },
+                        { time: '19:18:30', user: 'admin', cmd: 'systemctl status nginx', status: 'ok' },
+                        { time: '19:17:55', user: 'operator', cmd: 'tail -f /var/log/syslog', status: 'ok' },
+                        { time: '19:15:20', user: 'admin', cmd: 'chmod 777 /var/www', status: 'warning' },
+                        { time: '19:14:10', user: 'admin', cmd: 'df -h', status: 'ok' },
+                        { time: '19:12:05', user: 'operator', cmd: 'passwd root', status: 'blocked' },
+                      ].map((log, idx) => (
+                        <div key={idx} style={{ 
+                          display: 'flex', 
+                          alignItems: 'center', 
+                          gap: '12px', 
+                          padding: '8px 12px',
+                          borderRadius: '4px',
+                          background: log.status === 'blocked' ? '#ef444410' : log.status === 'warning' ? '#f59e0b10' : 'transparent',
+                        }}>
+                          <span style={{ color: 'var(--color-text-muted)' }}>{log.time}</span>
+                          <span style={{ width: '80px', color: getRoleColor(log.user === 'admin' ? 'ADMIN' : 'OPERATOR') }}>{log.user}</span>
+                          <span style={{ flex: 1 }}>
+                            {log.status === 'blocked' && <span style={{ color: '#ef4444' }}>🚫 </span>}
+                            {log.status === 'warning' && <span style={{ color: '#f59e0b' }}>⚠️ </span>}
+                            <span style={{ color: log.status === 'blocked' ? '#ef4444' : log.status === 'warning' ? '#f59e0b' : 'inherit' }}>{log.cmd}</span>
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{ marginTop: '12px', color: 'var(--color-text-muted)', fontSize: '0.8rem' }}>
+                      💡 실제 명령어 로그는 세션 녹화 및 감사 로그에서 확인할 수 있습니다.
+                    </div>
+                  </>
+                )}
+
+                {selectedTab === 'timeline' && (
+                  <>
+                    <h3 style={{ fontSize: '1rem', marginBottom: '16px', fontWeight: 600 }}>연결 타임라인</h3>
+                    <div style={{ display: 'flex', gap: '16px', marginBottom: '16px' }}>
+                      <select className="form-input form-select" style={{ width: '150px' }}>
+                        <option>오늘</option>
+                        <option>최근 7일</option>
+                        <option>최근 30일</option>
+                      </select>
+                      <select className="form-input form-select" style={{ width: '150px' }}>
+                        <option>모든 사용자</option>
+                        {accessedUsers.map(u => (
+                          <option key={u.id} value={u.id}>{u.name || u.email}</option>
+                        ))}
+                      </select>
+                    </div>
+                    {/* Timeline visualization */}
+                    <div style={{ position: 'relative', paddingLeft: '30px' }}>
+                      <div style={{ position: 'absolute', left: '10px', top: 0, bottom: 0, width: '2px', background: 'var(--color-border)' }} />
+                      {recentSessions.slice(0, 10).map((session, idx) => (
+                        <div key={session.id} style={{ position: 'relative', marginBottom: '20px', paddingLeft: '20px' }}>
+                          <div style={{ 
+                            position: 'absolute', 
+                            left: '-20px', 
+                            top: '4px',
+                            width: '12px', 
+                            height: '12px', 
+                            borderRadius: '50%', 
+                            background: session.status === 'ACTIVE' ? '#10b981' : 'var(--color-surface)',
+                            border: `2px solid ${session.status === 'ACTIVE' ? '#10b981' : 'var(--color-border)'}`,
+                          }} />
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                            <div>
+                              <div style={{ fontWeight: 500 }}>{session.user.name || session.user.email}</div>
+                              <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
+                                {formatTime(session.startedAt)} → {session.endedAt ? formatTime(session.endedAt) : '진행 중'}
+                              </div>
+                            </div>
+                            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                              <span style={{ padding: '2px 6px', background: getRoleColor(session.user.role) + '20', color: getRoleColor(session.user.role), borderRadius: '4px', fontSize: '0.7rem' }}>
+                                {session.user.role}
+                              </span>
+                              {session.status === 'ACTIVE' && (
+                                <span style={{ padding: '2px 6px', background: '#10b98120', color: '#10b981', borderRadius: '4px', fontSize: '0.7rem' }}>
+                                  🟢 연결됨
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                      {recentSessions.length === 0 && (
+                        <div style={{ textAlign: 'center', padding: '40px', color: 'var(--color-text-muted)' }}>
+                          연결 기록이 없습니다
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
+
                 {selectedTab === 'policies' && (
                   <>
                     <h3 style={{ fontSize: '1rem', marginBottom: '16px', fontWeight: 600 }}>적용된 정책</h3>
@@ -459,7 +566,7 @@ export default function ServerAccessPage() {
                     <h3 style={{ fontSize: '1rem', marginBottom: '16px', fontWeight: 600 }}>접근 설정</h3>
                     
                     {/* IP Whitelist */}
-                    <div style={{ marginBottom: '24px' }}>
+                    <div style={{ marginBottom: '24px', padding: '16px', background: 'var(--color-surface)', borderRadius: '8px' }}>
                       <h4 style={{ fontSize: '0.9rem', marginBottom: '12px', color: 'var(--color-text-secondary)' }}>🌐 IP 화이트리스트</h4>
                       <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
                         <input 
@@ -474,36 +581,121 @@ export default function ServerAccessPage() {
                       </div>
                       <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                         {ipWhitelist.map(ip => (
-                          <span key={ip} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 10px', background: 'var(--color-surface)', borderRadius: '6px', fontSize: '0.85rem' }}>
+                          <span key={ip} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 10px', background: 'var(--color-bg)', borderRadius: '6px', fontSize: '0.85rem' }}>
                             {ip}
                             <button onClick={() => handleRemoveIp(ip)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-danger)' }}>×</button>
                           </span>
                         ))}
                         {ipWhitelist.length === 0 && (
                           <span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>
-                            모든 IP에서 접근 가능 (화이트리스트 비활성)
+                            모든 IP에서 접근 가능
                           </span>
                         )}
                       </div>
                     </div>
 
-                    {/* Access Settings */}
-                    <div>
-                      <h4 style={{ fontSize: '0.9rem', marginBottom: '12px', color: 'var(--color-text-secondary)' }}>⚙️ 기타 설정</h4>
+                    {/* Session Limits */}
+                    <div style={{ marginBottom: '24px', padding: '16px', background: 'var(--color-surface)', borderRadius: '8px' }}>
+                      <h4 style={{ fontSize: '0.9rem', marginBottom: '12px', color: 'var(--color-text-secondary)' }}>⏱️ 세션 제한</h4>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                          <label className="form-label" style={{ fontSize: '0.8rem' }}>세션 타임아웃</label>
+                          <select className="form-input form-select">
+                            <option value="30">30분</option>
+                            <option value="60" selected>1시간</option>
+                            <option value="120">2시간</option>
+                            <option value="240">4시간</option>
+                            <option value="0">무제한</option>
+                          </select>
+                        </div>
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                          <label className="form-label" style={{ fontSize: '0.8rem' }}>최대 동시 세션</label>
+                          <select className="form-input form-select">
+                            <option value="1">1개</option>
+                            <option value="3" selected>3개</option>
+                            <option value="5">5개</option>
+                            <option value="10">10개</option>
+                            <option value="0">무제한</option>
+                          </select>
+                        </div>
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                          <label className="form-label" style={{ fontSize: '0.8rem' }}>유휴 타임아웃</label>
+                          <select className="form-input form-select">
+                            <option value="5">5분</option>
+                            <option value="10" selected>10분</option>
+                            <option value="15">15분</option>
+                            <option value="30">30분</option>
+                          </select>
+                        </div>
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                          <label className="form-label" style={{ fontSize: '0.8rem' }}>접근 시간대</label>
+                          <select className="form-input form-select">
+                            <option value="all">항상</option>
+                            <option value="business">업무시간 (9-18)</option>
+                            <option value="custom">사용자 지정</option>
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Security Settings */}
+                    <div style={{ marginBottom: '24px', padding: '16px', background: 'var(--color-surface)', borderRadius: '8px' }}>
+                      <h4 style={{ fontSize: '0.9rem', marginBottom: '12px', color: 'var(--color-text-secondary)' }}>🔒 보안 설정</h4>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                         <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
                           <input type="checkbox" defaultChecked />
                           <span>MFA 필수</span>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginLeft: 'auto' }}>권장</span>
                         </label>
                         <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
                           <input type="checkbox" defaultChecked />
                           <span>세션 녹화</span>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginLeft: 'auto' }}>필수</span>
                         </label>
                         <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
                           <input type="checkbox" />
-                          <span>승인 후 접근 (PROD 환경 권장)</span>
+                          <span>승인 후 접근</span>
+                          <span style={{ fontSize: '0.75rem', color: '#ef4444', marginLeft: 'auto' }}>PROD 추천</span>
+                        </label>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
+                          <input type="checkbox" defaultChecked />
+                          <span>파일 전송 허용</span>
+                        </label>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
+                          <input type="checkbox" />
+                          <span>클립보드 비활성화</span>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginLeft: 'auto' }}>보안 강화</span>
                         </label>
                       </div>
+                    </div>
+
+                    {/* Alert Settings */}
+                    <div style={{ marginBottom: '24px', padding: '16px', background: 'var(--color-surface)', borderRadius: '8px' }}>
+                      <h4 style={{ fontSize: '0.9rem', marginBottom: '12px', color: 'var(--color-text-secondary)' }}>🔔 알림 설정</h4>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
+                          <input type="checkbox" defaultChecked />
+                          <span>위험 명령어 실행 시 알림</span>
+                        </label>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
+                          <input type="checkbox" defaultChecked />
+                          <span>비정상 접근 시도 알림</span>
+                        </label>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
+                          <input type="checkbox" />
+                          <span>모든 세션 시작/종료 알림</span>
+                        </label>
+                        <div className="form-group" style={{ marginBottom: 0, marginTop: '8px' }}>
+                          <label className="form-label" style={{ fontSize: '0.8rem' }}>알림 수신자</label>
+                          <input type="text" className="form-input" placeholder="admin@example.com, security@example.com" />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Action Buttons */}
+                    <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+                      <button className="btn btn-secondary">초기화</button>
+                      <button className="btn btn-primary">💾 설정 저장</button>
                     </div>
                   </>
                 )}
@@ -516,7 +708,7 @@ export default function ServerAccessPage() {
       {/* Grant Access Modal */}
       {showGrantModal && selectedServer && (
         <div className="modal-overlay active" onClick={() => setShowGrantModal(false)}>
-          <div className="modal" style={{ maxWidth: '500px' }} onClick={(e) => e.stopPropagation()}>
+          <div className="modal" style={{ maxWidth: '600px' }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h3 className="modal-title">➕ 접근 권한 부여</h3>
               <button className="modal-close" onClick={() => setShowGrantModal(false)}>×</button>
@@ -524,26 +716,97 @@ export default function ServerAccessPage() {
             <div className="modal-body">
               <div className="form-group">
                 <label className="form-label">서버</label>
-                <div style={{ padding: '10px', background: 'var(--color-surface)', borderRadius: '6px' }}>
-                  {selectedServer.name} ({selectedServer.hostname})
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px', background: 'var(--color-surface)', borderRadius: '6px' }}>
+                  <span style={{ padding: '2px 8px', background: getEnvColor(selectedServer.environment) + '20', color: getEnvColor(selectedServer.environment), borderRadius: '4px', fontSize: '0.7rem', fontWeight: 600 }}>
+                    {selectedServer.environment}
+                  </span>
+                  <span style={{ fontWeight: 500 }}>{selectedServer.name}</span>
+                  <span style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', fontFamily: 'var(--font-mono)' }}>{selectedServer.hostname}</span>
                 </div>
               </div>
+
               <div className="form-group">
-                <label className="form-label">사용자 선택</label>
-                <select className="form-input form-select" value={grantUserId} onChange={(e) => setGrantUserId(e.target.value)}>
-                  <option value="">사용자를 선택하세요</option>
+                <label className="form-label">사용자 선택 <span style={{ color: 'var(--color-text-muted)', fontWeight: 400 }}>(다중 선택 가능)</span></label>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', padding: '12px', background: 'var(--color-surface)', borderRadius: '6px', maxHeight: '150px', overflow: 'auto' }}>
                   {allUsers.map(user => (
-                    <option key={user.id} value={user.id}>
-                      {user.name || user.email} ({user.role})
-                    </option>
+                    <label key={user.id} style={{ 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      gap: '6px', 
+                      padding: '6px 10px', 
+                      background: grantUserId === user.id ? 'var(--color-primary)' : 'var(--color-bg)', 
+                      borderRadius: '6px', 
+                      cursor: 'pointer',
+                      color: grantUserId === user.id ? 'white' : 'inherit',
+                      fontSize: '0.85rem',
+                    }}>
+                      <input 
+                        type="checkbox" 
+                        checked={grantUserId === user.id}
+                        onChange={() => setGrantUserId(grantUserId === user.id ? '' : user.id)}
+                        style={{ display: 'none' }}
+                      />
+                      <span style={{ padding: '1px 4px', background: getRoleColor(user.role) + '30', color: grantUserId === user.id ? 'white' : getRoleColor(user.role), borderRadius: '3px', fontSize: '0.65rem', fontWeight: 600 }}>
+                        {user.role}
+                      </span>
+                      {user.name || user.email}
+                    </label>
                   ))}
-                </select>
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">접근 수준</label>
+                  <select className="form-input form-select">
+                    <option value="full">전체 권한</option>
+                    <option value="read">읽기 전용</option>
+                    <option value="limited">제한된 명령어</option>
+                  </select>
+                </div>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">만료 기간</label>
+                  <select className="form-input form-select">
+                    <option value="">영구</option>
+                    <option value="1h">1시간</option>
+                    <option value="1d">1일</option>
+                    <option value="7d">7일</option>
+                    <option value="30d">30일</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="form-group" style={{ marginTop: '16px' }}>
+                <label className="form-label">메모 (선택)</label>
+                <textarea 
+                  className="form-input" 
+                  placeholder="접근 권한 부여 사유를 입력하세요..."
+                  rows={2}
+                  style={{ resize: 'vertical' }}
+                />
+              </div>
+
+              <div style={{ marginTop: '16px', padding: '12px', background: 'var(--color-surface)', borderRadius: '6px' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
+                  <input type="checkbox" />
+                  <span>예약 접근 설정</span>
+                </label>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '12px', opacity: 0.5 }}>
+                  <div>
+                    <label className="form-label" style={{ fontSize: '0.8rem' }}>시작 시간</label>
+                    <input type="datetime-local" className="form-input" disabled />
+                  </div>
+                  <div>
+                    <label className="form-label" style={{ fontSize: '0.8rem' }}>종료 시간</label>
+                    <input type="datetime-local" className="form-input" disabled />
+                  </div>
+                </div>
               </div>
             </div>
             <div className="modal-footer">
               <button className="btn btn-secondary" onClick={() => setShowGrantModal(false)}>취소</button>
               <button className="btn btn-primary" onClick={handleGrantAccess} disabled={!grantUserId}>
-                권한 부여
+                ✅ 권한 부여
               </button>
             </div>
           </div>

@@ -1,207 +1,113 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import AdminLayout from '@/components/admin/AdminLayout';
 
-interface Server {
+interface ServerGroup {
   id: string;
   name: string;
-  hostname: string;
-  environment: string;
-  isActive: boolean;
+  description: string;
+  environment: 'PRODUCTION' | 'STAGING' | 'DEVELOPMENT';
+  servers: string[];
+  policies: string[];
+  createdAt: string;
 }
 
-interface ServerGroup {
-  environment: string;
-  servers: Server[];
-}
+const initialGroups: ServerGroup[] = [
+  { id: '1', name: 'Production DB', description: '운영 데이터베이스 서버', environment: 'PRODUCTION', servers: ['prod-db-01', 'prod-db-02', 'prod-db-03'], policies: ['업무시간 접근 제한', 'MFA 필수'], createdAt: '2025-01-15' },
+  { id: '2', name: 'Production API', description: '운영 API 서버', environment: 'PRODUCTION', servers: ['prod-api-01', 'prod-api-02'], policies: ['업무시간 접근 제한'], createdAt: '2025-02-01' },
+  { id: '3', name: 'Staging All', description: '스테이징 전체', environment: 'STAGING', servers: ['staging-api-01', 'staging-web-01', 'staging-db-01'], policies: [], createdAt: '2025-03-01' },
+  { id: '4', name: 'Development', description: '개발 서버', environment: 'DEVELOPMENT', servers: ['dev-server-01', 'dev-server-02'], policies: [], createdAt: '2025-01-01' },
+];
 
 export default function ServerGroupsPage() {
-  const [groups, setGroups] = useState<ServerGroup[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  const [groups, setGroups] = useState<ServerGroup[]>(initialGroups);
+  const [selectedGroup, setSelectedGroup] = useState<ServerGroup | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
+  const [showEdit, setShowEdit] = useState(false);
+  const [success, setSuccess] = useState('');
+  const [form, setForm] = useState({ name: '', description: '', environment: 'DEVELOPMENT', servers: '' });
 
-  const getAuthHeaders = (): Record<string, string> => {
-    if (typeof window === 'undefined') return {};
-    const user = localStorage.getItem('user');
-    if (!user) return {};
-    try {
-      const { id } = JSON.parse(user);
-      return { 'Authorization': `Bearer ${id}` };
-    } catch {
-      return {};
+  useEffect(() => { if (success) { const t = setTimeout(() => setSuccess(''), 3000); return () => clearTimeout(t); } }, [success]);
+
+  const handleCreate = (e: React.FormEvent) => {
+    e.preventDefault();
+    const newGroup: ServerGroup = { id: String(Date.now()), ...form, environment: form.environment as ServerGroup['environment'], servers: form.servers.split(',').map(s => s.trim()).filter(Boolean), policies: [], createdAt: new Date().toISOString().slice(0, 10) };
+    setGroups([newGroup, ...groups]);
+    setSuccess('그룹 생성됨');
+    setShowCreate(false);
+    setForm({ name: '', description: '', environment: 'DEVELOPMENT', servers: '' });
+  };
+
+  const handleEdit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedGroup) return;
+    setGroups(groups.map(g => g.id === selectedGroup.id ? { ...g, ...form, environment: form.environment as ServerGroup['environment'], servers: form.servers.split(',').map(s => s.trim()).filter(Boolean) } : g));
+    setSuccess('수정됨');
+    setShowEdit(false);
+    setSelectedGroup(null);
+  };
+
+  const openEdit = (group: ServerGroup) => {
+    setForm({ name: group.name, description: group.description, environment: group.environment, servers: group.servers.join(', ') });
+    setSelectedGroup(group);
+    setShowEdit(true);
+  };
+
+  const handleDelete = (id: string) => {
+    if (confirm('삭제?')) {
+      setGroups(groups.filter(g => g.id !== id));
+      setSuccess('삭제됨');
+      setSelectedGroup(null);
     }
   };
 
-  const fetchServers = useCallback(async () => {
-    setLoading(true);
-    try {
-      const response = await fetch('/api/admin/servers', {
-        headers: getAuthHeaders(),
-      });
-
-      if (!response.ok) throw new Error('Failed to fetch servers');
-      
-      const data = await response.json();
-      const servers: Server[] = data.servers || [];
-      
-      // Group servers by environment
-      const groupMap = new Map<string, Server[]>();
-      servers.forEach(server => {
-        const env = server.environment || 'OTHER';
-        if (!groupMap.has(env)) {
-          groupMap.set(env, []);
-        }
-        groupMap.get(env)!.push(server);
-      });
-      
-      const groupedServers: ServerGroup[] = Array.from(groupMap.entries()).map(([environment, servers]) => ({
-        environment,
-        servers,
-      }));
-      
-      // Sort: PROD, STAGE, DEV, others
-      const order = ['PROD', 'STAGE', 'DEV'];
-      groupedServers.sort((a, b) => {
-        const aIdx = order.indexOf(a.environment);
-        const bIdx = order.indexOf(b.environment);
-        if (aIdx === -1 && bIdx === -1) return 0;
-        if (aIdx === -1) return 1;
-        if (bIdx === -1) return -1;
-        return aIdx - bIdx;
-      });
-      
-      setGroups(groupedServers);
-      setError('');
-    } catch (err) {
-      setError('서버 목록을 불러오는데 실패했습니다.');
-      console.error('Fetch servers error:', err);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchServers();
-  }, [fetchServers]);
-
-  const getEnvColor = (env: string) => {
-    switch (env) {
-      case 'PROD': return 'var(--color-danger)';
-      case 'STAGE': return 'var(--color-warning)';
-      case 'DEV': return 'var(--color-success)';
-      default: return 'var(--color-text-muted)';
-    }
-  };
-
-  const getEnvBadgeClass = (env: string) => {
-    switch (env) {
-      case 'PROD': return 'badge-danger';
-      case 'STAGE': return 'badge-warning';
-      case 'DEV': return 'badge-success';
-      default: return 'badge-info';
-    }
-  };
-
-  const prodCount = groups.find(g => g.environment === 'PROD')?.servers.length || 0;
-  const stageCount = groups.find(g => g.environment === 'STAGE')?.servers.length || 0;
-  const devCount = groups.find(g => g.environment === 'DEV')?.servers.length || 0;
+  const getEnvColor = (e: string) => ({ PRODUCTION: '#ef4444', STAGING: '#f59e0b', DEVELOPMENT: '#10b981' }[e] || '#6b7280');
 
   return (
-    <AdminLayout 
-      title="서버 그룹" 
-      description="환경별 서버 그룹 관리"
-      actions={
-        <button className="btn btn-ghost" onClick={() => fetchServers()}>🔄 새로고침</button>
-      }
-    >
-      {error && (
-        <div className="alert alert-danger" style={{ marginBottom: '16px' }}>
-          {error}
-          <button onClick={() => setError('')} style={{ float: 'right', background: 'none', border: 'none', cursor: 'pointer' }}>×</button>
-        </div>
+    <AdminLayout title="서버 그룹" description="서버 그룹 구성 관리" actions={<button className="btn btn-primary" onClick={() => setShowCreate(true)}>+ 그룹</button>}>
+      {success && <div className="alert alert-success" style={{ marginBottom: 16 }}>✅ {success}</div>}
+      
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16 }}>
+        {groups.map(g => (
+          <div key={g.id} className="card" style={{ cursor: 'pointer' }} onClick={() => setSelectedGroup(g)}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+              <span style={{ fontSize: '1.2rem' }}>📦</span>
+              <span style={{ fontWeight: 600, flex: 1 }}>{g.name}</span>
+              <span style={{ padding: '2px 8px', background: `${getEnvColor(g.environment)}20`, color: getEnvColor(g.environment), borderRadius: 4, fontSize: '0.75rem' }}>{g.environment}</span>
+            </div>
+            <div style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginBottom: 12 }}>{g.description}</div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
+              <span>🖥️ {g.servers.length}개 서버</span>
+              <span>📋 {g.policies.length}개 정책</span>
+            </div>
+          </div>
+        ))}
+      </div>
+      
+      {selectedGroup && !showEdit && (
+        <div className="modal-overlay active" onClick={() => setSelectedGroup(null)}><div className="modal" onClick={e => e.stopPropagation()}>
+          <div className="modal-header"><h3 className="modal-title">📦 {selectedGroup.name}</h3><button className="modal-close" onClick={() => setSelectedGroup(null)}>×</button></div>
+          <div className="modal-body">
+            <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}><span style={{ padding: '4px 10px', background: `${getEnvColor(selectedGroup.environment)}20`, color: getEnvColor(selectedGroup.environment), borderRadius: 6 }}>{selectedGroup.environment}</span></div>
+            <div style={{ marginBottom: 16 }}>{selectedGroup.description}</div>
+            <div style={{ marginBottom: 16 }}><b>서버 ({selectedGroup.servers.length}개):</b><div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>{selectedGroup.servers.map(s => <span key={s} style={{ padding: '4px 8px', background: 'var(--color-bg-secondary)', borderRadius: 4, fontSize: '0.85rem' }}>🖥️ {s}</span>)}</div></div>
+            {selectedGroup.policies.length > 0 && <div><b>정책:</b><div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>{selectedGroup.policies.map(p => <span key={p} style={{ padding: '4px 8px', background: 'var(--color-bg-secondary)', borderRadius: 4, fontSize: '0.85rem' }}>📋 {p}</span>)}</div></div>}
+          </div>
+          <div className="modal-footer"><button className="btn btn-secondary" onClick={() => openEdit(selectedGroup)}>✏️ 수정</button><button className="btn btn-ghost" style={{ color: 'var(--color-danger)' }} onClick={() => handleDelete(selectedGroup.id)}>🗑️</button><button className="btn btn-ghost" onClick={() => setSelectedGroup(null)}>닫기</button></div>
+        </div></div>
       )}
       
-      <div className="dashboard-grid" style={{ marginBottom: '24px', gridTemplateColumns: 'repeat(3, 1fr)' }}>
-        <div className="stat-card">
-          <div className="stat-label">PROD</div>
-          <div className="stat-value" style={{ color: 'var(--color-danger)' }}>{prodCount}</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-label">STAGE</div>
-          <div className="stat-value" style={{ color: 'var(--color-warning)' }}>{stageCount}</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-label">DEV</div>
-          <div className="stat-value" style={{ color: 'var(--color-success)' }}>{devCount}</div>
-        </div>
-      </div>
-
-      {loading ? (
-        <div style={{ display: 'flex', justifyContent: 'center', padding: '40px' }}>
-          <span className="spinner" style={{ width: '32px', height: '32px' }} />
-        </div>
-      ) : groups.length === 0 ? (
-        <div className="card" style={{ padding: '40px', textAlign: 'center', color: 'var(--color-text-muted)' }}>
-          서버가 없습니다. 먼저 서버를 추가해주세요.
-        </div>
-      ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '16px' }}>
-          {groups.map(group => (
-            <div 
-              key={group.environment} 
-              className="card" 
-              style={{ padding: '20px', borderTop: `3px solid ${getEnvColor(group.environment)}` }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '16px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <h3 style={{ fontWeight: 600 }}>{group.environment} 환경</h3>
-                  <span className={`badge ${getEnvBadgeClass(group.environment)}`}>
-                    {group.environment}
-                  </span>
-                </div>
-                <div style={{ fontSize: '1.5rem', fontWeight: 700, color: getEnvColor(group.environment) }}>
-                  {group.servers.length}
-                </div>
-              </div>
-              <div style={{ background: 'var(--color-surface)', borderRadius: 'var(--radius-md)', padding: '12px' }}>
-                {group.servers.map(server => (
-                  <div 
-                    key={server.id} 
-                    style={{ 
-                      display: 'flex', 
-                      justifyContent: 'space-between', 
-                      alignItems: 'center',
-                      fontSize: '0.85rem', 
-                      padding: '6px 0',
-                      borderBottom: '1px solid var(--color-border)',
-                    }}
-                  >
-                    <span style={{ fontWeight: 500 }}>{server.name}</span>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-muted)', fontSize: '0.8rem' }}>
-                        {server.hostname}
-                      </span>
-                      <span 
-                        style={{ 
-                          width: '8px', 
-                          height: '8px', 
-                          borderRadius: '50%', 
-                          background: server.isActive ? 'var(--color-success)' : 'var(--color-danger)' 
-                        }} 
-                      />
-                    </div>
-                  </div>
-                ))}
-                {group.servers.length === 0 && (
-                  <div style={{ color: 'var(--color-text-muted)', textAlign: 'center', padding: '12px' }}>
-                    서버 없음
-                  </div>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
+      {(showCreate || showEdit) && (
+        <div className="modal-overlay active" onClick={() => { setShowCreate(false); setShowEdit(false); setSelectedGroup(null); }}><div className="modal" onClick={e => e.stopPropagation()}>
+          <div className="modal-header"><h3 className="modal-title">{showEdit ? '✏️ 그룹 수정' : '📦 그룹 생성'}</h3><button className="modal-close" onClick={() => { setShowCreate(false); setShowEdit(false); setSelectedGroup(null); }}>×</button></div>
+          <form onSubmit={showEdit ? handleEdit : handleCreate}><div className="modal-body">
+            <div className="form-group"><label className="form-label">이름</label><input className="form-input" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required /></div>
+            <div className="form-group"><label className="form-label">설명</label><input className="form-input" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} /></div>
+            <div className="form-group"><label className="form-label">환경</label><select className="form-input" value={form.environment} onChange={e => setForm({ ...form, environment: e.target.value })}><option value="DEVELOPMENT">개발</option><option value="STAGING">스테이징</option><option value="PRODUCTION">운영</option></select></div>
+            <div className="form-group"><label className="form-label">서버 (쉼표 구분)</label><input className="form-input" value={form.servers} onChange={e => setForm({ ...form, servers: e.target.value })} placeholder="prod-db-01, prod-db-02" /></div>
+          </div><div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => { setShowCreate(false); setShowEdit(false); setSelectedGroup(null); }}>취소</button><button type="submit" className="btn btn-primary">{showEdit ? '저장' : '생성'}</button></div></form>
+        </div></div>
       )}
     </AdminLayout>
   );

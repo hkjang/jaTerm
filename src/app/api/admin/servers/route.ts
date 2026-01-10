@@ -1,260 +1,113 @@
-// Admin Servers API Routes
-// Full CRUD for server management
-
+// Admin Servers API - CRUD operations
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/db';
-import { logCreate, logUpdate, logDelete, getAuditContext } from '@/lib/audit/audit-logger';
-import { isAdminRole } from '@/lib/auth/otp-types';
 
-// Helper to get current admin user
-async function getAdminUser(request: NextRequest) {
-  const authHeader = request.headers.get('authorization');
-  if (!authHeader) return null;
-  
-  const userId = authHeader.replace('Bearer ', '');
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { id: true, email: true, role: true },
-  });
-  
-  if (!user || !isAdminRole(user.role)) return null;
-  return user;
-}
+// Mock database - in production, this would be Prisma or another DB
+let servers = [
+  { id: '1', name: 'prod-db-01', hostname: 'prod-db-01.internal', ip: '10.0.1.10', port: 22, type: 'DATABASE', status: 'ONLINE', environment: 'PRODUCTION', group: 'Database', cpu: 45, memory: 72, disk: 68, lastSeen: new Date().toISOString(), tags: ['postgresql', 'primary'], createdAt: '2025-06-01', updatedAt: new Date().toISOString() },
+  { id: '2', name: 'prod-api-01', hostname: 'prod-api-01.internal', ip: '10.0.1.20', port: 22, type: 'LINUX', status: 'ONLINE', environment: 'PRODUCTION', group: 'API', cpu: 32, memory: 58, disk: 45, lastSeen: new Date().toISOString(), tags: ['node', 'api'], createdAt: '2025-06-01', updatedAt: new Date().toISOString() },
+  { id: '3', name: 'prod-web-01', hostname: 'prod-web-01.internal', ip: '10.0.1.30', port: 22, type: 'LINUX', status: 'WARNING', environment: 'PRODUCTION', group: 'Web', cpu: 85, memory: 78, disk: 52, lastSeen: new Date().toISOString(), tags: ['nginx', 'frontend'], createdAt: '2025-06-01', updatedAt: new Date().toISOString() },
+  { id: '4', name: 'staging-api-01', hostname: 'staging-api-01.internal', ip: '10.0.2.20', port: 22, type: 'LINUX', status: 'ONLINE', environment: 'STAGING', group: 'API', cpu: 15, memory: 35, disk: 28, lastSeen: new Date().toISOString(), tags: ['staging'], createdAt: '2025-07-01', updatedAt: new Date().toISOString() },
+  { id: '5', name: 'prod-k8s-master', hostname: 'k8s-master.internal', ip: '10.0.1.100', port: 22, type: 'CONTAINER', status: 'ONLINE', environment: 'PRODUCTION', group: 'Kubernetes', cpu: 28, memory: 45, disk: 38, lastSeen: new Date().toISOString(), tags: ['k8s', 'master'], createdAt: '2025-08-01', updatedAt: new Date().toISOString() },
+];
 
-// GET: List all servers with filters
+// GET - List all servers with optional filtering
 export async function GET(request: NextRequest) {
   try {
-    const admin = await getAdminUser(request);
-    if (!admin) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const searchParams = request.nextUrl.searchParams;
+    const { searchParams } = new URL(request.url);
+    const search = searchParams.get('search');
+    const environment = searchParams.get('environment');
+    const status = searchParams.get('status');
     const page = parseInt(searchParams.get('page') || '1');
-    const limit = parseInt(searchParams.get('limit') || '20');
-    const environment = searchParams.get('environment') || '';
-    const search = searchParams.get('search') || '';
+    const limit = parseInt(searchParams.get('limit') || '50');
 
-    const where: Record<string, unknown> = {};
-    
-    if (environment) {
-      where.environment = environment;
-    }
-    
+    let filtered = [...servers];
+
     if (search) {
-      where.OR = [
-        { name: { contains: search } },
-        { hostname: { contains: search } },
-        { description: { contains: search } },
-      ];
-    }
-
-    const [servers, total] = await Promise.all([
-      prisma.server.findMany({
-        where,
-        select: {
-          id: true,
-          name: true,
-          hostname: true,
-          port: true,
-          username: true,
-          authType: true,
-          environment: true,
-          description: true,
-          tags: true,
-          isActive: true,
-          createdAt: true,
-          updatedAt: true,
-          _count: {
-            select: { terminalSessions: true },
-          },
-        },
-        orderBy: { createdAt: 'desc' },
-        skip: (page - 1) * limit,
-        take: limit,
-      }),
-      prisma.server.count({ where }),
-    ]);
-
-    const serversWithStats = servers.map(server => ({
-      ...server,
-      tags: server.tags ? JSON.parse(server.tags) : [],
-      sessionCount: server._count.terminalSessions,
-    }));
-
-    return NextResponse.json({
-      servers: serversWithStats,
-      pagination: {
-        page,
-        limit,
-        total,
-        totalPages: Math.ceil(total / limit),
-      },
-    });
-  } catch (error) {
-    console.error('List servers error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
-  }
-}
-
-// POST: Create new server
-export async function POST(request: NextRequest) {
-  try {
-    const admin = await getAdminUser(request);
-    if (!admin) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const body = await request.json();
-    const { 
-      name, 
-      hostname, 
-      port = 22, 
-      username, 
-      authType = 'KEY',
-      privateKey,
-      password,
-      environment = 'DEV',
-      description,
-      tags = [],
-    } = body;
-
-    if (!name || !hostname || !username) {
-      return NextResponse.json(
-        { error: 'Name, hostname, and username are required' },
-        { status: 400 }
+      const s = search.toLowerCase();
+      filtered = filtered.filter(srv => 
+        srv.name.toLowerCase().includes(s) ||
+        srv.hostname.toLowerCase().includes(s) ||
+        srv.ip.includes(s) ||
+        srv.tags.some(t => t.toLowerCase().includes(s))
       );
     }
 
-    // Create server
-    const server = await prisma.server.create({
-      data: {
-        name,
-        hostname,
-        port,
-        username,
-        authType,
-        privateKey,
-        password,
-        environment,
-        description,
-        tags: JSON.stringify(tags),
-      },
-      select: {
-        id: true,
-        name: true,
-        hostname: true,
-        port: true,
-        environment: true,
-        isActive: true,
-        createdAt: true,
-      },
-    });
+    if (environment && environment !== 'ALL') {
+      filtered = filtered.filter(srv => srv.environment === environment);
+    }
 
-    // Audit log
-    const context = getAuditContext(request);
-    await logCreate('Server', server.id, 
-      { name, hostname, port, environment },
-      { userId: admin.id, ...context }
-    );
+    if (status && status !== 'ALL') {
+      filtered = filtered.filter(srv => srv.status === status);
+    }
 
-    return NextResponse.json(server, { status: 201 });
+    const total = filtered.length;
+    const start = (page - 1) * limit;
+    const paginatedData = filtered.slice(start, start + limit);
+
+    return NextResponse.json({ success: true, data: paginatedData, total, page, limit });
   } catch (error) {
-    console.error('Create server error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ success: false, error: 'Failed to fetch servers' }, { status: 500 });
   }
 }
 
-// PUT: Update server
-export async function PUT(request: NextRequest) {
+// POST - Create new server
+export async function POST(request: NextRequest) {
   try {
-    const admin = await getAdminUser(request);
-    if (!admin) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
     const body = await request.json();
-    const { id, ...updateFields } = body;
+    const { name, hostname, ip, port = 22, type = 'LINUX', environment = 'DEVELOPMENT', group, tags = [] } = body;
 
-    if (!id) {
-      return NextResponse.json({ error: 'Server ID is required' }, { status: 400 });
+    if (!name || !hostname || !ip) {
+      return NextResponse.json({ success: false, error: 'Name, hostname, and IP are required' }, { status: 400 });
     }
 
-    // Get current server data for audit
-    const currentServer = await prisma.server.findUnique({
-      where: { id },
-      select: { name: true, hostname: true, port: true, environment: true, isActive: true },
-    });
-
-    if (!currentServer) {
-      return NextResponse.json({ error: 'Server not found' }, { status: 404 });
+    // Check for duplicate
+    if (servers.some(s => s.name === name || s.ip === ip)) {
+      return NextResponse.json({ success: false, error: 'Server with this name or IP already exists' }, { status: 400 });
     }
 
-    // Handle tags
-    if (updateFields.tags && Array.isArray(updateFields.tags)) {
-      updateFields.tags = JSON.stringify(updateFields.tags);
-    }
+    const newServer = {
+      id: String(Date.now()),
+      name,
+      hostname,
+      ip,
+      port,
+      type,
+      status: 'ONLINE',
+      environment,
+      group: group || undefined,
+      cpu: 0,
+      memory: 0,
+      disk: 0,
+      lastSeen: new Date().toISOString(),
+      tags: Array.isArray(tags) ? tags : tags.split(',').map((t: string) => t.trim()).filter(Boolean),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
 
-    // Update server
-    const updatedServer = await prisma.server.update({
-      where: { id },
-      data: updateFields,
-      select: {
-        id: true,
-        name: true,
-        hostname: true,
-        port: true,
-        environment: true,
-        isActive: true,
-        updatedAt: true,
-      },
-    });
+    servers.unshift(newServer);
 
-    // Audit log
-    const context = getAuditContext(request);
-    await logUpdate('Server', id, currentServer, updateFields, { userId: admin.id, ...context });
-
-    return NextResponse.json(updatedServer);
+    return NextResponse.json({ success: true, data: newServer }, { status: 201 });
   } catch (error) {
-    console.error('Update server error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ success: false, error: 'Failed to create server' }, { status: 500 });
   }
 }
 
-// DELETE: Delete server
+// DELETE bulk
 export async function DELETE(request: NextRequest) {
   try {
-    const admin = await getAdminUser(request);
-    if (!admin) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const body = await request.json();
+    const { ids } = body;
+
+    if (!ids || !Array.isArray(ids)) {
+      return NextResponse.json({ success: false, error: 'IDs array is required' }, { status: 400 });
     }
 
-    const { id } = await request.json();
+    const before = servers.length;
+    servers = servers.filter(s => !ids.includes(s.id));
+    const deleted = before - servers.length;
 
-    if (!id) {
-      return NextResponse.json({ error: 'Server ID is required' }, { status: 400 });
-    }
-
-    // Get server data for audit
-    const server = await prisma.server.findUnique({
-      where: { id },
-      select: { name: true, hostname: true, environment: true },
-    });
-
-    if (!server) {
-      return NextResponse.json({ error: 'Server not found' }, { status: 404 });
-    }
-
-    // Delete server
-    await prisma.server.delete({ where: { id } });
-
-    // Audit log
-    const context = getAuditContext(request);
-    await logDelete('Server', id, server, { userId: admin.id, ...context });
-
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, deleted });
   } catch (error) {
-    console.error('Delete server error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ success: false, error: 'Failed to delete servers' }, { status: 500 });
   }
 }

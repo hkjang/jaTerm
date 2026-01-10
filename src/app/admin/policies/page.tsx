@@ -1,1007 +1,143 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import AdminLayout from '@/components/admin/AdminLayout';
 
 interface Policy {
   id: string;
   name: string;
-  description: string | null;
-  isActive: boolean;
+  description: string;
+  type: 'TIME' | 'IP' | 'COMMAND' | 'MFA' | 'ROLE';
+  status: 'ACTIVE' | 'DISABLED' | 'TESTING';
   priority: number;
-  allowedRoles: string[];
-  commandMode: 'BLACKLIST' | 'WHITELIST';
-  commandPatterns: string[];
-  requireApproval: boolean;
-  allowedDays: number[];
-  allowedStartTime: string | null;
-  allowedEndTime: string | null;
-  servers: { id: string; name: string; environment?: string }[];
-  serverGroups: { id: string; name: string }[];
+  targets: string[];
+  conditions: Record<string, unknown>;
+  actions: string[];
   createdAt: string;
+  updatedAt: string;
 }
 
-interface Server {
-  id: string;
-  name: string;
-  hostname: string;
-  environment: string;
-}
-
-interface User {
-  id: string;
-  name: string;
-  email: string;
-  role: string;
-}
-
-interface Pagination {
-  page: number;
-  limit: number;
-  total: number;
-  totalPages: number;
-}
-
-interface SimulationResult {
-  allowed: boolean;
-  reason: string;
-  requiresApproval: boolean;
-  policyName?: string;
-  user?: { name: string; email: string; role: string };
-  server?: { name: string; environment: string };
-  details?: { type: string; message: string; policyName?: string }[];
-  evaluatedPolicies?: { name: string; priority: number; matched: boolean; matchReason: string }[];
-  restrictions?: { commandMode: string };
-}
-
-const DAY_NAMES = ['일', '월', '화', '수', '목', '금', '토'];
-const ROLES = ['ADMIN', 'OPERATOR', 'DEVELOPER', 'VIEWER'];
+const initialPolicies: Policy[] = [
+  { id: '1', name: '업무시간 접근 제한', description: '운영 서버 업무시간(09-18시)만 접근', type: 'TIME', status: 'ACTIVE', priority: 1, targets: ['prod-*'], conditions: { hours: '09:00-18:00', days: [1,2,3,4,5] }, actions: ['ALLOW'], createdAt: '2025-06-01', updatedAt: '2026-01-05' },
+  { id: '2', name: 'MFA 필수', description: '운영 서버 MFA 인증 필수', type: 'MFA', status: 'ACTIVE', priority: 2, targets: ['prod-*'], conditions: { require: true }, actions: ['REQUIRE_MFA'], createdAt: '2025-06-01', updatedAt: '2025-06-01' },
+  { id: '3', name: '위험 명령 차단', description: 'rm -rf, shutdown 등 위험 명령 차단', type: 'COMMAND', status: 'ACTIVE', priority: 3, targets: ['*'], conditions: { blocked: ['rm -rf', 'shutdown', 'reboot', 'init 0'] }, actions: ['BLOCK', 'ALERT'], createdAt: '2025-01-15', updatedAt: '2026-01-10' },
+  { id: '4', name: 'IP 화이트리스트', description: '허용된 IP에서만 접근', type: 'IP', status: 'ACTIVE', priority: 4, targets: ['prod-*'], conditions: { allowed: ['192.168.1.0/24', '10.0.0.0/8'] }, actions: ['ALLOW'], createdAt: '2025-03-01', updatedAt: '2025-12-20' },
+  { id: '5', name: '개발자 역할 제한', description: '개발자는 개발/스테이징만 접근', type: 'ROLE', status: 'ACTIVE', priority: 5, targets: ['dev-*', 'staging-*'], conditions: { roles: ['DEVELOPER'] }, actions: ['ALLOW'], createdAt: '2025-06-01', updatedAt: '2025-06-01' },
+];
 
 export default function PoliciesPage() {
-  const [policies, setPolicies] = useState<Policy[]>([]);
-  const [servers, setServers] = useState<Server[]>([]);
-  const [users, setUsers] = useState<User[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [pagination, setPagination] = useState<Pagination | null>(null);
-  const [showModal, setShowModal] = useState(false);
-  const [showSimulation, setShowSimulation] = useState(false);
-  const [showDetailModal, setShowDetailModal] = useState(false);
+  const [policies, setPolicies] = useState<Policy[]>(initialPolicies);
   const [selectedPolicy, setSelectedPolicy] = useState<Policy | null>(null);
-  const [editMode, setEditMode] = useState(false);
-  const [error, setError] = useState('');
+  const [showCreate, setShowCreate] = useState(false);
+  const [showEdit, setShowEdit] = useState(false);
   const [success, setSuccess] = useState('');
-  const [activeTab, setActiveTab] = useState<'list' | 'stats'>('list');
+  const [form, setForm] = useState({ name: '', description: '', type: 'TIME', priority: 10, targets: '', status: 'ACTIVE' });
 
-  // Form state
-  const [formData, setFormData] = useState({
-    id: '',
-    name: '',
-    description: '',
-    priority: 0,
-    allowedRoles: [] as string[],
-    commandMode: 'BLACKLIST',
-    commandPatterns: [] as string[],
-    newPattern: '',
-    allowedDays: [1, 2, 3, 4, 5] as number[],
-    allowedStartTime: '09:00',
-    allowedEndTime: '18:00',
-    requireApproval: false,
-    serverIds: [] as string[],
-  });
+  useEffect(() => { if (success) { const t = setTimeout(() => setSuccess(''), 3000); return () => clearTimeout(t); } }, [success]);
 
-  // Simulation state
-  const [simForm, setSimForm] = useState({
-    userId: '',
-    serverId: '',
-    simulatedTime: new Date().toISOString().slice(0, 16),
-  });
-  const [simResult, setSimResult] = useState<SimulationResult | null>(null);
-  const [simLoading, setSimLoading] = useState(false);
+  const handleCreate = (e: React.FormEvent) => {
+    e.preventDefault();
+    const newPolicy: Policy = { id: String(Date.now()), ...form, type: form.type as Policy['type'], status: form.status as Policy['status'], targets: form.targets.split(',').map(t => t.trim()).filter(Boolean), conditions: {}, actions: ['ALLOW'], createdAt: new Date().toISOString().slice(0, 10), updatedAt: new Date().toISOString().slice(0, 10) };
+    setPolicies([newPolicy, ...policies]);
+    setSuccess('정책 생성됨');
+    setShowCreate(false);
+    setForm({ name: '', description: '', type: 'TIME', priority: 10, targets: '', status: 'ACTIVE' });
+  };
 
-  const getAuthHeaders = (): Record<string, string> => {
-    if (typeof window === 'undefined') return {};
-    const user = localStorage.getItem('user');
-    if (!user) return {};
-    try {
-      const { id } = JSON.parse(user);
-      return { 'Authorization': `Bearer ${id}` };
-    } catch {
-      return {};
+  const handleEdit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedPolicy) return;
+    setPolicies(policies.map(p => p.id === selectedPolicy.id ? { ...p, ...form, type: form.type as Policy['type'], status: form.status as Policy['status'], targets: form.targets.split(',').map(t => t.trim()).filter(Boolean), updatedAt: new Date().toISOString().slice(0, 10) } : p));
+    setSuccess('수정됨');
+    setShowEdit(false);
+    setSelectedPolicy(null);
+  };
+
+  const openEdit = (policy: Policy) => {
+    setForm({ name: policy.name, description: policy.description, type: policy.type, priority: policy.priority, targets: policy.targets.join(', '), status: policy.status });
+    setSelectedPolicy(policy);
+    setShowEdit(true);
+  };
+
+  const handleToggle = (p: Policy) => {
+    setPolicies(policies.map(pol => pol.id === p.id ? { ...pol, status: pol.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE' } : pol));
+    setSuccess(p.status === 'ACTIVE' ? '비활성화됨' : '활성화됨');
+    setSelectedPolicy(null);
+  };
+
+  const handleDelete = (id: string) => {
+    if (confirm('삭제?')) {
+      setPolicies(policies.filter(p => p.id !== id));
+      setSuccess('삭제됨');
+      setSelectedPolicy(null);
     }
   };
 
-  const fetchPolicies = useCallback(async (page = 1) => {
-    setLoading(true);
-    try {
-      const params = new URLSearchParams({
-        page: page.toString(),
-        limit: '20',
-      });
-
-      const response = await fetch(`/api/admin/policies?${params}`, {
-        headers: getAuthHeaders(),
-      });
-
-      if (!response.ok) throw new Error('Failed to fetch policies');
-      
-      const data = await response.json();
-      setPolicies(data.policies);
-      setPagination(data.pagination);
-      setError('');
-    } catch (err) {
-      setError('정책 목록을 불러오는데 실패했습니다.');
-      console.error('Fetch policies error:', err);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  const fetchServers = useCallback(async () => {
-    try {
-      const response = await fetch('/api/admin/servers?limit=100', {
-        headers: getAuthHeaders(),
-      });
-      if (response.ok) {
-        const data = await response.json();
-        setServers(data.servers || []);
-      }
-    } catch (err) {
-      console.error('Fetch servers error:', err);
-    }
-  }, []);
-
-  const fetchUsers = useCallback(async () => {
-    try {
-      const response = await fetch('/api/admin/users?limit=100', {
-        headers: getAuthHeaders(),
-      });
-      if (response.ok) {
-        const data = await response.json();
-        setUsers(data.users || []);
-      }
-    } catch (err) {
-      console.error('Fetch users error:', err);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchPolicies();
-    fetchServers();
-    fetchUsers();
-  }, [fetchPolicies, fetchServers, fetchUsers]);
-
-  const resetForm = () => {
-    setFormData({
-      id: '',
-      name: '',
-      description: '',
-      priority: 0,
-      allowedRoles: [],
-      commandMode: 'BLACKLIST',
-      commandPatterns: [],
-      newPattern: '',
-      allowedDays: [1, 2, 3, 4, 5],
-      allowedStartTime: '09:00',
-      allowedEndTime: '18:00',
-      requireApproval: false,
-      serverIds: [],
-    });
-    setEditMode(false);
-  };
-
-  const openCreateModal = () => {
-    resetForm();
-    setShowModal(true);
-  };
-
-  const openEditModal = (policy: Policy) => {
-    setFormData({
-      id: policy.id,
-      name: policy.name,
-      description: policy.description || '',
-      priority: policy.priority,
-      allowedRoles: policy.allowedRoles || [],
-      commandMode: policy.commandMode,
-      commandPatterns: policy.commandPatterns || [],
-      newPattern: '',
-      allowedDays: policy.allowedDays || [],
-      allowedStartTime: policy.allowedStartTime || '09:00',
-      allowedEndTime: policy.allowedEndTime || '18:00',
-      requireApproval: policy.requireApproval,
-      serverIds: policy.servers.map(s => s.id),
-    });
-    setEditMode(true);
-    setShowModal(true);
-  };
-
-  const openDuplicateModal = (policy: Policy) => {
-    setFormData({
-      id: '',
-      name: `${policy.name} (복사)`,
-      description: policy.description || '',
-      priority: policy.priority,
-      allowedRoles: policy.allowedRoles || [],
-      commandMode: policy.commandMode,
-      commandPatterns: policy.commandPatterns || [],
-      newPattern: '',
-      allowedDays: policy.allowedDays || [],
-      allowedStartTime: policy.allowedStartTime || '09:00',
-      allowedEndTime: policy.allowedEndTime || '18:00',
-      requireApproval: policy.requireApproval,
-      serverIds: policy.servers.map(s => s.id),
-    });
-    setEditMode(false);
-    setShowModal(true);
-  };
-
-  const handleSavePolicy = async () => {
-    try {
-      const method = editMode ? 'PUT' : 'POST';
-      const payload: Record<string, unknown> = {
-        name: formData.name,
-        description: formData.description,
-        priority: formData.priority,
-        allowedRoles: formData.allowedRoles,
-        commandMode: formData.commandMode,
-        commandPatterns: formData.commandPatterns,
-        allowedDays: formData.allowedDays,
-        allowedStartTime: formData.allowedStartTime,
-        allowedEndTime: formData.allowedEndTime,
-        requireApproval: formData.requireApproval,
-        serverIds: formData.serverIds,
-      };
-
-      if (editMode) {
-        payload.id = formData.id;
-      }
-
-      const response = await fetch('/api/admin/policies', {
-        method,
-        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-
-      if (!response.ok) throw new Error('Failed to save policy');
-
-      setSuccess(editMode ? '정책이 수정되었습니다.' : '정책이 생성되었습니다.');
-      setShowModal(false);
-      resetForm();
-      fetchPolicies();
-    } catch (err) {
-      setError(editMode ? '정책 수정에 실패했습니다.' : '정책 생성에 실패했습니다.');
-    }
-  };
-
-  const handleToggleActive = async (policy: Policy) => {
-    try {
-      await fetch('/api/admin/policies', {
-        method: 'PUT',
-        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: policy.id, isActive: !policy.isActive }),
-      });
-
-      setSuccess(policy.isActive ? '정책이 비활성화되었습니다.' : '정책이 활성화되었습니다.');
-      fetchPolicies();
-    } catch (err) {
-      setError('상태 변경에 실패했습니다.');
-    }
-  };
-
-  const handleDeletePolicy = async (policyId: string) => {
-    if (!confirm('정말 이 정책을 삭제하시겠습니까?')) return;
-
-    try {
-      await fetch('/api/admin/policies', {
-        method: 'DELETE',
-        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: policyId }),
-      });
-
-      setSuccess('정책이 삭제되었습니다.');
-      fetchPolicies();
-    } catch (err) {
-      setError('정책 삭제에 실패했습니다.');
-    }
-  };
-
-  const handleSimulation = async () => {
-    if (!simForm.userId || !simForm.serverId) {
-      setError('사용자와 서버를 선택해주세요.');
-      return;
-    }
-
-    setSimLoading(true);
-    try {
-      const response = await fetch('/api/admin/policies/simulate', {
-        method: 'POST',
-        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
-        body: JSON.stringify(simForm),
-      });
-
-      if (!response.ok) throw new Error('Simulation failed');
-      
-      const result = await response.json();
-      setSimResult(result);
-    } catch (err) {
-      setError('시뮬레이션에 실패했습니다.');
-    } finally {
-      setSimLoading(false);
-    }
-  };
-
-  const handleRoleToggle = (role: string) => {
-    setFormData(prev => ({
-      ...prev,
-      allowedRoles: prev.allowedRoles.includes(role)
-        ? prev.allowedRoles.filter(r => r !== role)
-        : [...prev.allowedRoles, role]
-    }));
-  };
-
-  const handleDayToggle = (day: number) => {
-    setFormData(prev => ({
-      ...prev,
-      allowedDays: prev.allowedDays.includes(day)
-        ? prev.allowedDays.filter(d => d !== day)
-        : [...prev.allowedDays, day].sort()
-    }));
-  };
-
-  const handleServerToggle = (serverId: string) => {
-    setFormData(prev => ({
-      ...prev,
-      serverIds: prev.serverIds.includes(serverId)
-        ? prev.serverIds.filter(s => s !== serverId)
-        : [...prev.serverIds, serverId]
-    }));
-  };
-
-  const addCommandPattern = () => {
-    if (!formData.newPattern.trim()) return;
-    setFormData(prev => ({
-      ...prev,
-      commandPatterns: [...prev.commandPatterns, prev.newPattern.trim()],
-      newPattern: '',
-    }));
-  };
-
-  const removeCommandPattern = (idx: number) => {
-    setFormData(prev => ({
-      ...prev,
-      commandPatterns: prev.commandPatterns.filter((_, i) => i !== idx),
-    }));
-  };
-
-  const getDayNames = (days: number[]) => {
-    return days.map(d => DAY_NAMES[d]).join(', ');
-  };
-
-  // Stats calculation
-  const activeCount = policies.filter(p => p.isActive).length;
-  const approvalRequiredCount = policies.filter(p => p.requireApproval).length;
-  const whitelistCount = policies.filter(p => p.commandMode === 'WHITELIST').length;
+  const getTypeIcon = (t: string) => ({ TIME: '⏰', IP: '🌐', COMMAND: '⌨️', MFA: '📱', ROLE: '🛡️' }[t] || '📋');
+  const getStatusColor = (s: string) => ({ ACTIVE: '#10b981', DISABLED: '#6b7280', TESTING: '#f59e0b' }[s] || '#6b7280');
 
   return (
-    <AdminLayout 
-      title="접근 정책" 
-      description="서버 접근 정책 및 시간 제어 설정"
-      actions={
-        <>
-          <button className="btn btn-secondary" onClick={() => { setShowSimulation(true); setSimResult(null); }}>🔍 시뮬레이션</button>
-          <button className="btn btn-primary" style={{ marginLeft: '8px' }} onClick={openCreateModal}>+ 정책 추가</button>
-        </>
-      }
-    >
-      {/* Messages */}
-      {success && (
-        <div className="alert alert-success" style={{ marginBottom: '16px' }}>
-          {success}
-          <button onClick={() => setSuccess('')} style={{ float: 'right', background: 'none', border: 'none', cursor: 'pointer' }}>×</button>
-        </div>
-      )}
-      {error && (
-        <div className="alert alert-danger" style={{ marginBottom: '16px' }}>
-          {error}
-          <button onClick={() => setError('')} style={{ float: 'right', background: 'none', border: 'none', cursor: 'pointer' }}>×</button>
-        </div>
-      )}
-
-      {/* Stats Cards */}
-      <div className="dashboard-grid" style={{ marginBottom: '24px', gridTemplateColumns: 'repeat(4, 1fr)' }}>
-        <div className="stat-card">
-          <div className="stat-label">전체 정책</div>
-          <div className="stat-value">{policies.length}</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-label">활성 정책</div>
-          <div className="stat-value" style={{ color: 'var(--color-success)' }}>{activeCount}</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-label">승인 필요</div>
-          <div className="stat-value" style={{ color: 'var(--color-warning)' }}>{approvalRequiredCount}</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-label">화이트리스트</div>
-          <div className="stat-value" style={{ color: 'var(--color-info)' }}>{whitelistCount}</div>
-        </div>
+    <AdminLayout title="접근 정책" description="서버 접근 제어 정책 관리" actions={<button className="btn btn-primary" onClick={() => setShowCreate(true)}>+ 정책</button>}>
+      {success && <div className="alert alert-success" style={{ marginBottom: 16 }}>✅ {success}</div>}
+      
+      <div className="dashboard-grid" style={{ marginBottom: 24, gridTemplateColumns: 'repeat(4, 1fr)' }}>
+        <div className="stat-card"><div className="stat-label">전체</div><div className="stat-value">{policies.length}</div></div>
+        <div className="stat-card"><div className="stat-label">✅ 활성</div><div className="stat-value" style={{ color: '#10b981' }}>{policies.filter(p => p.status === 'ACTIVE').length}</div></div>
+        <div className="stat-card"><div className="stat-label">⏸️ 비활성</div><div className="stat-value">{policies.filter(p => p.status === 'DISABLED').length}</div></div>
+        <div className="stat-card"><div className="stat-label">🧪 테스트</div><div className="stat-value" style={{ color: '#f59e0b' }}>{policies.filter(p => p.status === 'TESTING').length}</div></div>
       </div>
-
-      {/* Tabs */}
-      <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
-        <button 
-          className={`btn ${activeTab === 'list' ? 'btn-primary' : 'btn-ghost'}`}
-          onClick={() => setActiveTab('list')}
-        >
-          📋 정책 목록
-        </button>
-        <button 
-          className={`btn ${activeTab === 'stats' ? 'btn-primary' : 'btn-ghost'}`}
-          onClick={() => setActiveTab('stats')}
-        >
-          📊 환경별 현황
-        </button>
+      
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {policies.sort((a, b) => a.priority - b.priority).map(p => (
+          <div key={p.id} className="card" style={{ cursor: 'pointer' }} onClick={() => setSelectedPolicy(p)}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+              <div style={{ fontSize: '1.5rem' }}>{getTypeIcon(p.type)}</div>
+              <div style={{ flex: 1 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                  <span style={{ fontWeight: 600 }}>{p.name}</span>
+                  <span style={{ padding: '2px 6px', background: 'var(--color-bg-secondary)', borderRadius: 4, fontSize: '0.7rem' }}>#{p.priority}</span>
+                  <span style={{ padding: '2px 6px', background: `${getStatusColor(p.status)}20`, color: getStatusColor(p.status), borderRadius: 4, fontSize: '0.7rem' }}>{p.status}</span>
+                </div>
+                <div style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>{p.description}</div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: 4 }}>대상: {p.targets.join(', ')}</div>
+              </div>
+              <div onClick={e => e.stopPropagation()} style={{ display: 'flex', gap: 4 }}>
+                <button className="btn btn-ghost btn-sm" onClick={() => handleToggle(p)}>{p.status === 'ACTIVE' ? '⏸️' : '▶️'}</button>
+                <button className="btn btn-ghost btn-sm" onClick={() => openEdit(p)}>✏️</button>
+                <button className="btn btn-ghost btn-sm" onClick={() => handleDelete(p.id)}>🗑️</button>
+              </div>
+            </div>
+          </div>
+        ))}
       </div>
-
-      {activeTab === 'list' ? (
-        <>
-          {/* Policies Grid */}
-          {loading ? (
-            <div style={{ display: 'flex', justifyContent: 'center', padding: '40px' }}>
-              <span className="spinner" style={{ width: '32px', height: '32px' }} />
-            </div>
-          ) : policies.length === 0 ? (
-            <div className="card" style={{ padding: '40px', textAlign: 'center', color: 'var(--color-text-muted)' }}>
-              정책이 없습니다. 새 정책을 추가해주세요.
-            </div>
-          ) : (
-            <div style={{ display: 'grid', gap: '16px' }}>
-              {policies.map(policy => (
-                <div key={policy.id} className="card" style={{ padding: '20px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px' }}>
-                    <div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
-                        <h3 style={{ fontWeight: 600, fontSize: '1.1rem' }}>{policy.name}</h3>
-                        <span className={`badge ${policy.isActive ? 'badge-success' : 'badge-danger'}`}>
-                          {policy.isActive ? '활성' : '비활성'}
-                        </span>
-                        <span className="badge badge-info" style={{ fontSize: '0.7rem' }}>
-                          우선순위: {policy.priority}
-                        </span>
-                      </div>
-                      <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.9rem' }}>
-                        {policy.description || '설명 없음'}
-                      </p>
-                    </div>
-                    <div style={{ display: 'flex', gap: '8px' }}>
-                      <button 
-                        className="btn btn-ghost btn-sm"
-                        onClick={() => { setSelectedPolicy(policy); setShowDetailModal(true); }}
-                      >
-                        상세
-                      </button>
-                      <button 
-                        className="btn btn-ghost btn-sm"
-                        onClick={() => openEditModal(policy)}
-                      >
-                        편집
-                      </button>
-                      <button 
-                        className="btn btn-ghost btn-sm"
-                        onClick={() => openDuplicateModal(policy)}
-                      >
-                        복제
-                      </button>
-                      <button 
-                        className="btn btn-ghost btn-sm"
-                        onClick={() => handleToggleActive(policy)}
-                      >
-                        {policy.isActive ? '비활성화' : '활성화'}
-                      </button>
-                      <button 
-                        className="btn btn-ghost btn-sm" 
-                        style={{ color: 'var(--color-danger)' }}
-                        onClick={() => handleDeletePolicy(policy.id)}
-                      >
-                        삭제
-                      </button>
-                    </div>
-                  </div>
-
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '16px' }}>
-                    <div style={{ background: 'var(--color-surface)', padding: '12px', borderRadius: 'var(--radius-md)' }}>
-                      <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginBottom: '4px' }}>허용 역할</div>
-                      <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-                        {policy.allowedRoles.length > 0 ? (
-                          policy.allowedRoles.map(role => (
-                            <span key={role} className="badge badge-info" style={{ fontSize: '0.7rem' }}>{role}</span>
-                          ))
-                        ) : (
-                          <span style={{ color: 'var(--color-text-muted)', fontSize: '0.8rem' }}>전체</span>
-                        )}
-                      </div>
-                    </div>
-                    <div style={{ background: 'var(--color-surface)', padding: '12px', borderRadius: 'var(--radius-md)' }}>
-                      <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginBottom: '4px' }}>명령 제어</div>
-                      <span className={`badge ${policy.commandMode === 'WHITELIST' ? 'badge-warning' : 'badge-info'}`}>
-                        {policy.commandMode === 'WHITELIST' ? '화이트리스트' : '블랙리스트'}
-                      </span>
-                      {policy.commandPatterns && policy.commandPatterns.length > 0 && (
-                        <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '4px' }}>
-                          {policy.commandPatterns.length}개 패턴
-                        </div>
-                      )}
-                    </div>
-                    <div style={{ background: 'var(--color-surface)', padding: '12px', borderRadius: 'var(--radius-md)' }}>
-                      <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginBottom: '4px' }}>접근 시간</div>
-                      <div style={{ fontSize: '0.9rem' }}>
-                        {policy.allowedDays.length > 0 ? getDayNames(policy.allowedDays) : '매일'}<br />
-                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.85rem' }}>
-                          {policy.allowedStartTime || '00:00'} - {policy.allowedEndTime || '23:59'}
-                        </span>
-                      </div>
-                    </div>
-                    <div style={{ background: 'var(--color-surface)', padding: '12px', borderRadius: 'var(--radius-md)' }}>
-                      <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginBottom: '4px' }}>승인 필요</div>
-                      {policy.requireApproval 
-                        ? <span style={{ color: 'var(--color-warning)' }}>⚠️ 사전 승인 필요</span> 
-                        : <span style={{ color: 'var(--color-success)' }}>✓ 즉시 접근 가능</span>
-                      }
-                    </div>
-                    <div style={{ background: 'var(--color-surface)', padding: '12px', borderRadius: 'var(--radius-md)' }}>
-                      <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginBottom: '4px' }}>적용 서버</div>
-                      <div style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--color-primary)' }}>
-                        {policy.servers.length}대
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Pagination */}
-          {pagination && pagination.totalPages > 1 && (
-            <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', marginTop: '24px' }}>
-              <button 
-                className="btn btn-ghost btn-sm" 
-                disabled={pagination.page <= 1}
-                onClick={() => fetchPolicies(pagination.page - 1)}
-              >
-                ← 이전
-              </button>
-              <span style={{ padding: '8px', color: 'var(--color-text-secondary)' }}>
-                {pagination.page} / {pagination.totalPages}
-              </span>
-              <button 
-                className="btn btn-ghost btn-sm"
-                disabled={pagination.page >= pagination.totalPages}
-                onClick={() => fetchPolicies(pagination.page + 1)}
-              >
-                다음 →
-              </button>
-            </div>
-          )}
-        </>
-      ) : (
-        /* Stats Tab */
-        <div className="card" style={{ padding: '20px' }}>
-          <h3 style={{ marginBottom: '16px', fontWeight: 600 }}>환경별 정책 현황</h3>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
-            {['PROD', 'STAGE', 'DEV'].map(env => {
-              const envServers = servers.filter(s => s.environment === env);
-              const coveredServers = envServers.filter(s => 
-                policies.some(p => p.servers.some(ps => ps.id === s.id))
-              );
-              return (
-                <div key={env} className="stat-card">
-                  <div className="stat-label">
-                    <span className={`badge ${env === 'PROD' ? 'badge-danger' : env === 'STAGE' ? 'badge-warning' : 'badge-success'}`}>
-                      {env}
-                    </span>
-                  </div>
-                  <div className="stat-value" style={{ fontSize: '1.5rem' }}>
-                    {coveredServers.length}/{envServers.length}
-                  </div>
-                  <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
-                    서버에 정책 적용
-                  </div>
-                </div>
-              );
-            })}
+      
+      {selectedPolicy && !showEdit && (
+        <div className="modal-overlay active" onClick={() => setSelectedPolicy(null)}><div className="modal" onClick={e => e.stopPropagation()}>
+          <div className="modal-header"><h3 className="modal-title">{getTypeIcon(selectedPolicy.type)} {selectedPolicy.name}</h3><button className="modal-close" onClick={() => setSelectedPolicy(null)}>×</button></div>
+          <div className="modal-body">
+            <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}><span style={{ padding: '4px 10px', background: `${getStatusColor(selectedPolicy.status)}20`, color: getStatusColor(selectedPolicy.status), borderRadius: 6 }}>{selectedPolicy.status}</span><span style={{ padding: '4px 10px', background: 'var(--color-bg-secondary)', borderRadius: 6 }}>{selectedPolicy.type}</span><span style={{ padding: '4px 10px', background: 'var(--color-bg-secondary)', borderRadius: 6 }}>우선순위 #{selectedPolicy.priority}</span></div>
+            <div style={{ marginBottom: 16 }}>{selectedPolicy.description}</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}><div><b>대상:</b> {selectedPolicy.targets.join(', ')}</div><div><b>생성:</b> {selectedPolicy.createdAt}</div><div><b>수정:</b> {selectedPolicy.updatedAt}</div></div>
+            <div style={{ marginTop: 16, padding: 12, background: 'var(--color-bg-secondary)', borderRadius: 6, fontFamily: 'monospace', fontSize: '0.85rem' }}><b>조건:</b> {JSON.stringify(selectedPolicy.conditions, null, 2)}</div>
           </div>
-        </div>
+          <div className="modal-footer"><button className="btn btn-primary" onClick={() => handleToggle(selectedPolicy)}>{selectedPolicy.status === 'ACTIVE' ? '⏸️ 비활성화' : '▶️ 활성화'}</button><button className="btn btn-secondary" onClick={() => openEdit(selectedPolicy)}>✏️ 수정</button><button className="btn btn-ghost" style={{ color: 'var(--color-danger)' }} onClick={() => handleDelete(selectedPolicy.id)}>🗑️</button><button className="btn btn-ghost" onClick={() => setSelectedPolicy(null)}>닫기</button></div>
+        </div></div>
       )}
-
-      {/* Create/Edit Policy Modal */}
-      {showModal && (
-        <div className="modal-overlay active" onClick={() => setShowModal(false)}>
-          <div className="modal" style={{ maxWidth: '700px', maxHeight: '90vh', overflow: 'auto' }} onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3 className="modal-title">{editMode ? '정책 수정' : '정책 추가'}</h3>
-              <button className="modal-close" onClick={() => setShowModal(false)}>×</button>
+      
+      {(showCreate || showEdit) && (
+        <div className="modal-overlay active" onClick={() => { setShowCreate(false); setShowEdit(false); setSelectedPolicy(null); }}><div className="modal" onClick={e => e.stopPropagation()}>
+          <div className="modal-header"><h3 className="modal-title">{showEdit ? '✏️ 정책 수정' : '📋 정책 생성'}</h3><button className="modal-close" onClick={() => { setShowCreate(false); setShowEdit(false); setSelectedPolicy(null); }}>×</button></div>
+          <form onSubmit={showEdit ? handleEdit : handleCreate}><div className="modal-body">
+            <div className="form-group"><label className="form-label">이름</label><input className="form-input" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required /></div>
+            <div className="form-group"><label className="form-label">설명</label><input className="form-input" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} /></div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+              <div className="form-group"><label className="form-label">유형</label><select className="form-input" value={form.type} onChange={e => setForm({ ...form, type: e.target.value })}><option value="TIME">시간</option><option value="IP">IP</option><option value="COMMAND">명령어</option><option value="MFA">MFA</option><option value="ROLE">역할</option></select></div>
+              <div className="form-group"><label className="form-label">우선순위</label><input type="number" className="form-input" value={form.priority} onChange={e => setForm({ ...form, priority: parseInt(e.target.value) })} /></div>
+              <div className="form-group"><label className="form-label">상태</label><select className="form-input" value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}><option value="ACTIVE">활성</option><option value="DISABLED">비활성</option><option value="TESTING">테스트</option></select></div>
             </div>
-            <div className="modal-body">
-              <div className="form-group">
-                <label className="form-label">정책 이름 *</label>
-                <input 
-                  type="text" 
-                  className="form-input" 
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  placeholder="예: Production Access"
-                />
-              </div>
-              <div className="form-group">
-                <label className="form-label">설명</label>
-                <input 
-                  type="text" 
-                  className="form-input"
-                  value={formData.description}
-                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  placeholder="정책에 대한 설명"
-                />
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-                <div className="form-group">
-                  <label className="form-label">우선순위</label>
-                  <input 
-                    type="number" 
-                    className="form-input" 
-                    value={formData.priority}
-                    onChange={(e) => setFormData({ ...formData, priority: parseInt(e.target.value) || 0 })}
-                    placeholder="0"
-                  />
-                  <small style={{ color: 'var(--color-text-muted)' }}>높을수록 먼저 평가</small>
-                </div>
-                <div className="form-group">
-                  <label className="form-label">명령 제어 모드</label>
-                  <select 
-                    className="form-input form-select"
-                    value={formData.commandMode}
-                    onChange={(e) => setFormData({ ...formData, commandMode: e.target.value })}
-                  >
-                    <option value="BLACKLIST">블랙리스트 (위험 명령 차단)</option>
-                    <option value="WHITELIST">화이트리스트 (허용 명령만 실행)</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">허용 역할</label>
-                <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-                  {ROLES.map(role => (
-                    <label key={role} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <input 
-                        type="checkbox"
-                        checked={formData.allowedRoles.includes(role)}
-                        onChange={() => handleRoleToggle(role)}
-                      />
-                      {role}
-                    </label>
-                  ))}
-                </div>
-                <small style={{ color: 'var(--color-text-muted)' }}>선택 안함 = 전체 역할</small>
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">허용 요일</label>
-                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                  {DAY_NAMES.map((name, idx) => (
-                    <button
-                      key={idx}
-                      type="button"
-                      className={`btn btn-sm ${formData.allowedDays.includes(idx) ? 'btn-primary' : 'btn-ghost'}`}
-                      onClick={() => handleDayToggle(idx)}
-                      style={{ minWidth: '40px' }}
-                    >
-                      {name}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-                <div className="form-group">
-                  <label className="form-label">시작 시간</label>
-                  <input 
-                    type="time" 
-                    className="form-input" 
-                    value={formData.allowedStartTime}
-                    onChange={(e) => setFormData({ ...formData, allowedStartTime: e.target.value })}
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">종료 시간</label>
-                  <input 
-                    type="time" 
-                    className="form-input" 
-                    value={formData.allowedEndTime}
-                    onChange={(e) => setFormData({ ...formData, allowedEndTime: e.target.value })}
-                  />
-                </div>
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">명령 패턴 ({formData.commandMode === 'WHITELIST' ? '허용' : '차단'})</label>
-                <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
-                  <input 
-                    type="text" 
-                    className="form-input" 
-                    value={formData.newPattern}
-                    onChange={(e) => setFormData({ ...formData, newPattern: e.target.value })}
-                    onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), addCommandPattern())}
-                    placeholder="rm -rf, shutdown, reboot..."
-                    style={{ flex: 1 }}
-                  />
-                  <button className="btn btn-secondary" onClick={addCommandPattern}>추가</button>
-                </div>
-                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                  {formData.commandPatterns.map((pattern, idx) => (
-                    <span key={idx} className="badge badge-info" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                      <code>{pattern}</code>
-                      <button 
-                        onClick={() => removeCommandPattern(idx)}
-                        style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0 2px' }}
-                      >
-                        ×
-                      </button>
-                    </span>
-                  ))}
-                </div>
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">적용 서버</label>
-                <div style={{ maxHeight: '150px', overflow: 'auto', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', padding: '8px' }}>
-                  {servers.length === 0 ? (
-                    <div style={{ color: 'var(--color-text-muted)', padding: '8px' }}>서버가 없습니다.</div>
-                  ) : (
-                    servers.map(server => (
-                      <label 
-                        key={server.id} 
-                        style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 0' }}
-                      >
-                        <input 
-                          type="checkbox"
-                          checked={formData.serverIds.includes(server.id)}
-                          onChange={() => handleServerToggle(server.id)}
-                        />
-                        <span className={`badge ${server.environment === 'PROD' ? 'badge-danger' : server.environment === 'STAGE' ? 'badge-warning' : 'badge-success'}`} style={{ fontSize: '0.65rem' }}>
-                          {server.environment}
-                        </span>
-                        <span>{server.name}</span>
-                        <span style={{ color: 'var(--color-text-muted)', fontSize: '0.8rem' }}>{server.hostname}</span>
-                      </label>
-                    ))
-                  )}
-                </div>
-                <small style={{ color: 'var(--color-text-muted)' }}>{formData.serverIds.length}개 선택됨</small>
-              </div>
-
-              <div className="form-group">
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <input 
-                    type="checkbox"
-                    checked={formData.requireApproval}
-                    onChange={(e) => setFormData({ ...formData, requireApproval: e.target.checked })}
-                  />
-                  사전 승인 필요
-                </label>
-              </div>
-            </div>
-            <div className="modal-footer">
-              <button className="btn btn-secondary" onClick={() => setShowModal(false)}>취소</button>
-              <button 
-                className="btn btn-primary"
-                onClick={handleSavePolicy}
-                disabled={!formData.name}
-              >
-                {editMode ? '수정' : '추가'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Policy Detail Modal */}
-      {showDetailModal && selectedPolicy && (
-        <div className="modal-overlay active" onClick={() => setShowDetailModal(false)}>
-          <div className="modal" style={{ maxWidth: '600px' }} onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3 className="modal-title">정책 상세: {selectedPolicy.name}</h3>
-              <button className="modal-close" onClick={() => setShowDetailModal(false)}>×</button>
-            </div>
-            <div className="modal-body">
-              <div style={{ display: 'grid', gap: '16px' }}>
-                <div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>설명</div>
-                  <div style={{ fontWeight: 500 }}>{selectedPolicy.description || '없음'}</div>
-                </div>
-                <div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>명령 패턴</div>
-                  {selectedPolicy.commandPatterns && selectedPolicy.commandPatterns.length > 0 ? (
-                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '4px' }}>
-                      {selectedPolicy.commandPatterns.map((p, idx) => (
-                        <code key={idx} style={{ padding: '2px 6px', background: 'var(--color-surface)', borderRadius: '4px', fontSize: '0.85rem' }}>{p}</code>
-                      ))}
-                    </div>
-                  ) : (
-                    <span style={{ color: 'var(--color-text-muted)' }}>없음</span>
-                  )}
-                </div>
-                <div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginBottom: '8px' }}>적용 서버</div>
-                  {selectedPolicy.servers.length > 0 ? (
-                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                      {selectedPolicy.servers.map(server => (
-                        <span key={server.id} className="badge badge-info">{server.name}</span>
-                      ))}
-                    </div>
-                  ) : (
-                    <span style={{ color: 'var(--color-text-muted)' }}>없음</span>
-                  )}
-                </div>
-                <div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>생성일</div>
-                  <div>{new Date(selectedPolicy.createdAt).toLocaleString()}</div>
-                </div>
-              </div>
-            </div>
-            <div className="modal-footer">
-              <button className="btn btn-secondary" onClick={() => setShowDetailModal(false)}>닫기</button>
-              <button className="btn btn-primary" onClick={() => { setShowDetailModal(false); openEditModal(selectedPolicy); }}>편집</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Simulation Modal */}
-      {showSimulation && (
-        <div className="modal-overlay active" onClick={() => setShowSimulation(false)}>
-          <div className="modal" style={{ maxWidth: '650px' }} onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3 className="modal-title">🔍 정책 시뮬레이션</h3>
-              <button className="modal-close" onClick={() => setShowSimulation(false)}>×</button>
-            </div>
-            <div className="modal-body">
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-                <div className="form-group">
-                  <label className="form-label">사용자</label>
-                  <select 
-                    className="form-input form-select"
-                    value={simForm.userId}
-                    onChange={(e) => setSimForm({ ...simForm, userId: e.target.value })}
-                  >
-                    <option value="">사용자 선택</option>
-                    {users.map(user => (
-                      <option key={user.id} value={user.id}>
-                        {user.name || user.email} ({user.role})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="form-group">
-                  <label className="form-label">대상 서버</label>
-                  <select 
-                    className="form-input form-select"
-                    value={simForm.serverId}
-                    onChange={(e) => setSimForm({ ...simForm, serverId: e.target.value })}
-                  >
-                    <option value="">서버 선택</option>
-                    {servers.map(server => (
-                      <option key={server.id} value={server.id}>
-                        [{server.environment}] {server.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-              <div className="form-group">
-                <label className="form-label">시뮬레이션 시간</label>
-                <input 
-                  type="datetime-local" 
-                  className="form-input" 
-                  value={simForm.simulatedTime}
-                  onChange={(e) => setSimForm({ ...simForm, simulatedTime: e.target.value })}
-                />
-              </div>
-              <button 
-                className="btn btn-primary" 
-                style={{ width: '100%', marginTop: '8px' }}
-                onClick={handleSimulation}
-                disabled={simLoading || !simForm.userId || !simForm.serverId}
-              >
-                {simLoading ? '평가 중...' : '🔍 시뮬레이션 실행'}
-              </button>
-
-              {simResult && (
-                <div style={{ marginTop: '20px' }}>
-                  <div style={{ 
-                    background: simResult.allowed ? 'rgba(34, 197, 94, 0.1)' : 'rgba(239, 68, 68, 0.1)', 
-                    padding: '16px', 
-                    borderRadius: 'var(--radius-md)',
-                    border: `1px solid ${simResult.allowed ? 'var(--color-success)' : 'var(--color-danger)'}`,
-                    marginBottom: '16px'
-                  }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
-                      <span style={{ fontSize: '1.5rem' }}>{simResult.allowed ? '✅' : '❌'}</span>
-                      <div>
-                        <div style={{ fontWeight: 600, fontSize: '1.1rem' }}>
-                          {simResult.allowed ? '접근 허용' : '접근 거부'}
-                        </div>
-                        <div style={{ fontSize: '0.9rem', color: 'var(--color-text-secondary)' }}>
-                          {simResult.reason}
-                        </div>
-                      </div>
-                    </div>
-                    {simResult.requiresApproval && (
-                      <div className="badge badge-warning">사전 승인 필요</div>
-                    )}
-                    {simResult.policyName && (
-                      <div style={{ marginTop: '8px', fontSize: '0.85rem' }}>
-                        적용 정책: <strong>{simResult.policyName}</strong>
-                      </div>
-                    )}
-                    {simResult.restrictions?.commandMode && (
-                      <div style={{ marginTop: '4px', fontSize: '0.85rem' }}>
-                        명령 제어: <span className="badge badge-info">{simResult.restrictions.commandMode}</span>
-                      </div>
-                    )}
-                  </div>
-
-                  {simResult.details && simResult.details.length > 0 && (
-                    <div style={{ marginBottom: '16px' }}>
-                      <div style={{ fontSize: '0.9rem', fontWeight: 500, marginBottom: '8px' }}>평가 과정</div>
-                      {simResult.details.map((detail, idx) => (
-                        <div key={idx} style={{ 
-                          display: 'flex', 
-                          alignItems: 'center', 
-                          gap: '8px', 
-                          padding: '6px 0',
-                          borderBottom: '1px solid var(--color-border)'
-                        }}>
-                          <span>
-                            {detail.type === 'success' ? '✓' : detail.type === 'error' ? '✗' : detail.type === 'warning' ? '⚠' : 'ℹ'}
-                          </span>
-                          <span style={{ fontSize: '0.85rem' }}>{detail.message}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {simResult.evaluatedPolicies && simResult.evaluatedPolicies.length > 0 && (
-                    <div>
-                      <div style={{ fontSize: '0.9rem', fontWeight: 500, marginBottom: '8px' }}>평가된 정책</div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                        {simResult.evaluatedPolicies.map((p, idx) => (
-                          <div key={idx} style={{ 
-                            display: 'flex', 
-                            alignItems: 'center', 
-                            justifyContent: 'space-between',
-                            padding: '8px',
-                            background: 'var(--color-surface)',
-                            borderRadius: 'var(--radius-md)'
-                          }}>
-                            <div>
-                              <span style={{ fontWeight: 500 }}>{p.name}</span>
-                              <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginLeft: '8px' }}>우선순위 {p.priority}</span>
-                            </div>
-                            <div style={{ fontSize: '0.85rem', color: p.matched ? 'var(--color-success)' : 'var(--color-text-muted)' }}>
-                              {p.matchReason}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-            <div className="modal-footer">
-              <button className="btn btn-secondary" onClick={() => setShowSimulation(false)}>닫기</button>
-            </div>
-          </div>
-        </div>
+            <div className="form-group"><label className="form-label">대상 (쉼표 구분)</label><input className="form-input" value={form.targets} onChange={e => setForm({ ...form, targets: e.target.value })} placeholder="prod-*, staging-*" /></div>
+          </div><div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => { setShowCreate(false); setShowEdit(false); setSelectedPolicy(null); }}>취소</button><button type="submit" className="btn btn-primary">{showEdit ? '저장' : '생성'}</button></div></form>
+        </div></div>
       )}
     </AdminLayout>
   );

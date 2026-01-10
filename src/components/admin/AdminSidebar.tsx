@@ -17,76 +17,76 @@ interface NavSection {
   items: NavItem[];
 }
 
+// Consolidated navigation - merged duplicates, reduced to 8 essential sections
 const navSections: NavSection[] = [
   {
     title: 'Overview',
     items: [
       { href: '/admin', label: '대시보드', icon: '📊' },
-      { href: '/admin/operations', label: '운영 모니터링', icon: '💓' },
+      { href: '/admin/system-health', label: '시스템 상태', icon: '💚' },
+      { href: '/admin/alerts', label: '알림 관리', icon: '🔔', badge: 5, badgeType: 'warning' },
     ],
   },
   {
-    title: '계정·권한',
+    title: '사용자·권한',
     items: [
-      { href: '/admin/users', label: '사용자 관리', icon: '👥' },
-      { href: '/admin/admins', label: '관리자 계정', icon: '🔐' },
-      { href: '/admin/access-history', label: '접근 이력', icon: '📜' },
-    ],
-  },
-  {
-    title: '서버·자원',
-    items: [
-      { href: '/admin/servers', label: '서버 관리', icon: '🖥️' },
-      { href: '/admin/server-access', label: '접근 권한', icon: '🔐' },
-      { href: '/admin/server-groups', label: '서버 그룹', icon: '📦' },
-    ],
-  },
-  {
-    title: '정책',
-    items: [
-      { href: '/admin/policies', label: '접근 정책', icon: '📋' },
-      { href: '/admin/commands', label: '명령어 통제', icon: '⌨️' },
-      { href: '/admin/approvals', label: '승인 워크플로', icon: '✅' },
+      { href: '/admin/users', label: '사용자', icon: '👥' },
+      { href: '/admin/roles', label: '역할', icon: '🛡️' },
+      { href: '/admin/access-approval', label: '접근 승인', icon: '✋', badge: 2, badgeType: 'warning' },
       { href: '/admin/emergency', label: '긴급 접근', icon: '🚨' },
     ],
   },
   {
-    title: '세션',
+    title: '서버·인프라',
     items: [
-      { href: '/admin/sessions', label: '세션 관제', icon: '📺' },
-      { href: '/admin/recordings', label: '세션 녹화', icon: '🎬' },
+      { href: '/admin/servers', label: '서버', icon: '🖥️' },
+      { href: '/admin/server-groups', label: '서버 그룹', icon: '📦' },
+      { href: '/admin/databases', label: '데이터베이스', icon: '🗄️' },
+      { href: '/admin/containers', label: '컨테이너', icon: '🐳' },
     ],
   },
   {
-    title: '감사',
+    title: '보안·자격증명',
+    items: [
+      { href: '/admin/credentials', label: '자격증명', icon: '🔒' },
+      { href: '/admin/ssh-keys', label: 'SSH 키', icon: '🔑' },
+      { href: '/admin/certificates', label: '인증서', icon: '📜' },
+      { href: '/admin/mfa-settings', label: 'MFA', icon: '📱' },
+      { href: '/admin/ip-management', label: 'IP 관리', icon: '🌐' },
+      { href: '/admin/policies', label: '접근 정책', icon: '📋' },
+    ],
+  },
+  {
+    title: '세션·모니터링',
+    items: [
+      { href: '/admin/sessions', label: '세션', icon: '📺' },
+      { href: '/admin/recordings', label: '녹화', icon: '🎬' },
+      { href: '/admin/file-transfers', label: '파일 전송', icon: '📁' },
+      { href: '/admin/command-history', label: '명령 이력', icon: '⌨️' },
+    ],
+  },
+  {
+    title: '감사·로그',
     items: [
       { href: '/admin/audit', label: '감사 로그', icon: '📝' },
       { href: '/admin/compliance', label: '컴플라이언스', icon: '✓' },
+      { href: '/admin/analytics', label: '분석', icon: '📈' },
     ],
   },
   {
-    title: 'AI',
+    title: '운영',
     items: [
-      { href: '/admin/alerts', label: '보안 알림', icon: '🔔' },
-      { href: '/admin/ai-security', label: 'AI 보안', icon: '🛡️' },
-      { href: '/admin/ai-providers', label: 'AI Provider', icon: '🔌' },
-      { href: '/admin/ai-models', label: 'AI 모델', icon: '🧠' },
-      { href: '/admin/ai-prompts', label: '프롬프트', icon: '📝' },
-      { href: '/admin/ai-policies', label: 'AI 정책', icon: '📋' },
-      { href: '/admin/ai-logs', label: 'AI 로그', icon: '📊' },
+      { href: '/admin/backups', label: '백업', icon: '💾' },
+      { href: '/admin/scheduled-tasks', label: '스케줄', icon: '⏰' },
+      { href: '/admin/incidents', label: '인시던트', icon: '🚨' },
     ],
   },
   {
-    title: '자동화',
-    items: [
-      { href: '/admin/macros', label: '매크로', icon: '⚙️' },
-      { href: '/admin/schedules', label: '스케줄', icon: '🕐' },
-    ],
-  },
-  {
-    title: '시스템',
+    title: '설정',
     items: [
       { href: '/admin/settings', label: '시스템 설정', icon: '⚙️' },
+      { href: '/admin/api-keys', label: 'API 키', icon: '🔑' },
+      { href: '/admin/webhooks', label: 'Webhooks', icon: '🔗' },
     ],
   },
 ];
@@ -95,7 +95,6 @@ export default function AdminSidebar() {
   const pathname = usePathname();
   const sidebarRef = useRef<HTMLElement>(null);
 
-  // Auto-scroll to selected menu item
   useEffect(() => {
     if (sidebarRef.current) {
       const activeLink = sidebarRef.current.querySelector('.sidebar-link.active');
@@ -107,13 +106,7 @@ export default function AdminSidebar() {
 
   return (
     <aside ref={sidebarRef} className="sidebar" style={{ position: 'fixed', top: 0, height: '100vh', overflow: 'auto' }}>
-      <div style={{ 
-        padding: '12px 16px',
-        borderBottom: '1px solid var(--color-border)',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '10px'
-      }}>
+      <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--color-border)', display: 'flex', alignItems: 'center', gap: '10px' }}>
         <div className="header-logo-icon" style={{ width: '28px', height: '28px', fontSize: '0.9rem' }}>⌘</div>
         <span style={{ fontWeight: 600, fontSize: '0.95rem' }}>jaTerm Admin</span>
       </div>
@@ -131,10 +124,7 @@ export default function AdminSidebar() {
                 <span className="sidebar-link-icon">{item.icon}</span>
                 <span>{item.label}</span>
                 {item.badge !== undefined && item.badge > 0 && (
-                  <span 
-                    className={`badge badge-${item.badgeType || 'info'}`} 
-                    style={{ marginLeft: 'auto' }}
-                  >
+                  <span className={`badge badge-${item.badgeType || 'info'}`} style={{ marginLeft: 'auto' }}>
                     {item.badge}
                   </span>
                 )}
@@ -144,20 +134,9 @@ export default function AdminSidebar() {
         ))}
       </nav>
 
-      <div style={{ 
-        position: 'fixed',
-        bottom: 0,
-        left: 0,
-        width: 'var(--sidebar-width)',
-        padding: '16px',
-        borderTop: '1px solid var(--color-border)',
-        background: 'var(--color-bg)',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '8px'
-      }}>
+      <div style={{ position: 'fixed', bottom: 0, left: 0, width: 'var(--sidebar-width)', padding: '16px', borderTop: '1px solid var(--color-border)', background: 'var(--color-bg)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
         <Link href="/terminal" className="btn btn-secondary btn-sm" style={{ width: '100%' }}>
-          ⌨️ 터미널로 이동
+          ⌨️ 터미널
         </Link>
         <button 
           className="btn btn-ghost btn-sm" 
